@@ -1,0 +1,21 @@
+{
+  "init_lr" : 0.01,
+  "momentum" : 0.9,
+  "weight_decay": 5e-4,
+  "root" : "D:\\workspace\\datasets\\segmentation\\CamVid\\preprocessed",
+  "epochs": 300,
+  "lr_sche": "poly",
+  "image_size": [360, 480],
+  "super_reso": true,
+  "fusion": true,
+  "num_classes": 32,
+  "gpu_index": "0",
+  "model_name": "deeplabv3plus",
+  "backbone": "resnet101",
+  "channel": 3,
+  "upscale_rate": 2,
+  "num_workers": 4,
+  "ckpt_dir": "./ckpt",
+  "dataset": "camvid",
+  "batch_size": 2
+}

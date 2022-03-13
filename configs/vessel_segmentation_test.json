@@ -1,0 +1,19 @@
+{
+   "image_dir" : "D:/workspace/MachineLearning/MegVision/data/octa6m/test/images",
+  "image_suffix": ".png",
+  "mask_dir": "D:/workspace/MachineLearning/MegVision/data/octa6m/test/labels",
+  "mask_suffix": ".png",
+  "image_size": [200, 200],
+  "super_reso": true,
+  "fusion": true,
+  "num_classes": 2,
+  "divide": true,
+  "gpu_index": "0",
+  "model_name": "unet",
+  "block_name": "origin",
+  "channel": 3,
+  "upscale_rate": 2,
+  "weights": "ckpt/unet_origin/octa6m/unet_origin_octa6m_best.pth",
+  "dataset": "octa6m",
+  "output_dir": "output/octa6m/unet_test_fusion"
+}
