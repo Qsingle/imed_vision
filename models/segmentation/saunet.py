@@ -15,43 +15,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-class DropoutBlock(nn.Module):
-    def __init__(self, drop_prob, kernel_size, gamma_scale:float=1.0,
-                 batch_wise:bool=False, with_noise:bool=False):
-        super(DropoutBlock, self).__init__()
-        self.drop_prob = drop_prob
-        self.kernel_size = kernel_size
-        self.gama_scale = gamma_scale
-        self.batch_wise = batch_wise
-        self.with_noise = with_noise
-
-    def forward(self, x):
-        if not self.training or self.drop_prob <= 0.0:
-            return x
-        _, c, h, w = x.shape
-        total_size = w * h
-        clipped_block_size = min(self.kernel_size, min(w, h))
-        gamma = self.gama_scale * self.drop_prob * total_size / clipped_block_size ** 2 / (
-                (w - self.kernel_size + 1) * (h - self.kernel_size + 1)
-        )
-        if self.batch_wise:
-            # one mask for whole batch, quite a bit faster
-            block_mask = torch.rand((1, c, h, w), dtype=x.dtype, device=x.device) < gamma
-        else:
-            # mask per batch element
-            block_mask = torch.rand_like(x) < gamma
-
-        block_mask = F.max_pool2d(
-            block_mask.to(x.dtype), kernel_size=clipped_block_size, stride=1, padding=clipped_block_size // 2)
-        if self.with_noise:
-            normal_noise = torch.randn(size=x.shape if not self.batch_wise else (1, c, h, w))
-            y = x * (1. - block_mask) + normal_noise * block_mask
-        else:
-            block_mask = 1 - block_mask
-            normalize_scale = (block_mask.numel() / block_mask.to(dtype=torch.float32).sum().add(1e-7)).to(dtype=x.dtype)
-            y = x * block_mask * normalize_scale
-        return y
-
+from layers import DropoutBlock
 
 class DConv(nn.Module):
     def __init__(self, in_ch, out_ch, expansion=1.0,
@@ -90,6 +54,15 @@ class SA(nn.Module):
 
 class SAUnet(nn.Module):
     def __init__(self, in_ch, num_classes=2, keep_prob=0.82, drop_block_size=11):
+        """
+        Implementation of the SA-Unet.
+        "SA-UNet: Spatial Attention U-Net for Retinal Vessel Segmentation"<https://arxiv.org/abs/2004.03696v3>
+        Args:
+            in_ch (int): number of channels for input
+            num_classes (int): number of classes
+            keep_prob (float): keep rate for the conv layer, dropout rate = 1 - keep_prob
+            drop_block_size (int): kernel size of the dropout block
+        """
         super(SAUnet, self).__init__()
         drop_prob = 1 - keep_prob
         base_ch = 16
@@ -119,7 +92,7 @@ class SAUnet(nn.Module):
         self.deconv7 = nn.ConvTranspose2d(base_ch*2, base_ch, kernel_size=3, stride=2, padding=1, output_padding=1)
         self.decoder7 = DConv(base_ch*2, base_ch)
 
-        self.out_conv = nn.Conv2d(base_ch, num_classes, 1)
+        self.out_conv = nn.Conv2d(base_ch, num_classes, kernel_size=1, stride=1, padding=0)
 
     def forward(self, x):
         down1_0 = self.encoder1(x)

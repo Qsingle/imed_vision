@@ -27,7 +27,7 @@ class Unet(nn.Module):
                  radix=2, drop_prob=0.0, reduction=4, norm_layer=nn.BatchNorm2d,
                  activation=nn.ReLU(inplace=True), avd=False, avd_first=False,
                  layer_attention=False, super_reso=False, upscale_rate=2, sr_layer=4,
-                 sr_seg_fusion=False):
+                 sr_seg_fusion=False, **kwargs):
         """
         Unet with different block.
         References:
@@ -51,41 +51,41 @@ class Unet(nn.Module):
         super(Unet, self).__init__()
         self.down1 = Downsample(in_ch, 64, convblock=convblock, radix=radix, drop_prob=drop_prob,
                                 dilation=1, padding=1, reduction=reduction,avd=avd, avd_first=avd_first,
-                                norm_layer=norm_layer, activation=activation, expansion=expansion)
+                                norm_layer=norm_layer, activation=activation, expansion=expansion, **kwargs)
         self.down2 = Downsample(64, 128, convblock=convblock, radix=radix, drop_prob=drop_prob,
                                 dilation=1, padding=1, reduction=reduction,avd=avd, avd_first=avd_first,
-                                norm_layer=norm_layer, activation=activation, expansion=expansion)
+                                norm_layer=norm_layer, activation=activation, expansion=expansion, **kwargs)
         self.down3 = Downsample(128, 256, convblock=convblock, radix=radix, drop_prob=drop_prob,
                                 dilation=1, padding=1, reduction=reduction,avd=avd, avd_first=avd_first,
-                                norm_layer=norm_layer, activation=activation, expansion=expansion)
+                                norm_layer=norm_layer, activation=activation, expansion=expansion, **kwargs)
         self.down4 = Downsample(256, 512, convblock=convblock, radix=radix, drop_prob=drop_prob,
                                 dilation=1, padding=1, reduction=reduction,avd=avd, avd_first=avd_first,
-                                norm_layer=norm_layer, activation=activation, expansion=expansion)
+                                norm_layer=norm_layer, activation=activation, expansion=expansion, **kwargs)
         self.down5 = convblock(512, 1024, radix=radix, drop_prob=drop_prob,
                                 dilation=1, padding=1, reduction=reduction,avd=avd, avd_first=avd_first,
-                                norm_layer=norm_layer, activation=activation, expansion=expansion)
+                                norm_layer=norm_layer, activation=activation, expansion=expansion, **kwargs)
         self.layer_attention = layer_attention
         self.super_reso = super_reso
         if super_reso:
             self.sup = SuperResolutionModule(64)
             self.sup_conv = convblock(3, 64, radix=radix, drop_prob=drop_prob,
                                 dilation=1, padding=1, reduction=reduction,avd=avd, avd_first=avd_first,
-                                norm_layer=norm_layer, activation=activation, expansion=expansion)
+                                norm_layer=norm_layer, activation=activation, expansion=expansion, **kwargs)
             self.sup_down = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
         #
         self.up6 = Upsample(1024, 512, 512, convblock=convblock, radix=radix, drop_prob=drop_prob,
                                 dilation=1, padding=1, reduction=reduction, avd=avd, avd_first=avd_first,
-                                norm_layer=norm_layer, activation=activation, expansion=expansion)
+                                norm_layer=norm_layer, activation=activation, expansion=expansion, **kwargs)
         self.up7 = Upsample(512, 256, 256, convblock=convblock, radix=radix, drop_prob=drop_prob,
                                 dilation=1, padding=1, reduction=reduction, avd=avd, avd_first=avd_first,
-                                norm_layer=norm_layer, activation=activation, expansion=expansion)
+                                norm_layer=norm_layer, activation=activation, expansion=expansion, **kwargs)
         self.up8 = Upsample(256, 128, 128, convblock=convblock, radix=radix, drop_prob=drop_prob,
                                 dilation=1, padding=1, reduction=reduction, avd=avd, avd_first=avd_first,
-                                norm_layer=norm_layer, activation=activation, expansion=expansion)
+                                norm_layer=norm_layer, activation=activation, expansion=expansion, **kwargs)
 
         self.up9 = Upsample(128, 64, 64, convblock=convblock, radix=radix, drop_prob=drop_prob,
                                 dilation=1, padding=1, reduction=reduction, avd=avd, avd_first=avd_first,
-                                norm_layer=norm_layer, activation=activation, expansion=expansion)
+                                norm_layer=norm_layer, activation=activation, expansion=expansion, **kwargs)
 
         self.out_conv = nn.Conv2d(64, out_ch, kernel_size=1, stride=1, padding=0)
 
@@ -95,28 +95,28 @@ class Unet(nn.Module):
             if sr_layer == 4:
                 self.sr_up6 = Upsample(512, 256, 256, radix=radix, drop_prob=drop_prob,
                                 dilation=1, padding=1, reduction=reduction, avd=avd, avd_first=avd_first,
-                                norm_layer=norm_layer, activation=activation, expansion=expansion)
+                                norm_layer=norm_layer, activation=activation, expansion=expansion, **kwargs)
                 self.sr_up7 = Upsample(256, 128, 128,radix=radix, drop_prob=drop_prob,
                                 dilation=1, padding=1, reduction=reduction, avd=avd, avd_first=avd_first,
-                                norm_layer=norm_layer, activation=activation, expansion=expansion)
+                                norm_layer=norm_layer, activation=activation, expansion=expansion, **kwargs)
                 self.sr_up8 = Upsample(128, 64, 64, radix=radix, drop_prob=drop_prob,
                                 dilation=1, padding=1, reduction=reduction, avd=avd, avd_first=avd_first,
-                                norm_layer=norm_layer, activation=activation, expansion=expansion)
+                                norm_layer=norm_layer, activation=activation, expansion=expansion, **kwargs)
                 self.sr_up9 = nn.Identity()
             elif sr_layer == 5:
                 self.sr_up6 = Upsample(1024, 512, 512, radix=radix, drop_prob=drop_prob,
                                     dilation=1, padding=1, reduction=reduction, avd=avd, avd_first=avd_first,
-                                    norm_layer=norm_layer, activation=activation, expansion=expansion)
+                                    norm_layer=norm_layer, activation=activation, expansion=expansion, **kwargs)
                 self.sr_up7 = Upsample(512, 256, 256, convblock=convblock, radix=radix, drop_prob=drop_prob,
                                     dilation=1, padding=1, reduction=reduction, avd=avd, avd_first=avd_first,
-                                    norm_layer=norm_layer, activation=activation, expansion=expansion)
+                                    norm_layer=norm_layer, activation=activation, expansion=expansion, **kwargs)
                 self.sr_up8 = Upsample(256, 128, 128, convblock=convblock, radix=radix, drop_prob=drop_prob,
                                     dilation=1, padding=1, reduction=reduction, avd=avd, avd_first=avd_first,
-                                    norm_layer=norm_layer, activation=activation, expansion=expansion)
+                                    norm_layer=norm_layer, activation=activation, expansion=expansion, **kwargs)
 
                 self.sr_up9 = Upsample(128, 64, 64, convblock=convblock, radix=radix, drop_prob=drop_prob,
                                     dilation=1, padding=1, reduction=reduction, avd=avd, avd_first=avd_first,
-                                    norm_layer=norm_layer, activation=activation, expansion=expansion)
+                                    norm_layer=norm_layer, activation=activation, expansion=expansion, **kwargs)
 
             self.sr_module = nn.Sequential(
                 nn.Conv2d(64, 64, kernel_size=5, stride=1, padding=2, bias=False),

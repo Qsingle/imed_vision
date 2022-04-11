@@ -51,19 +51,19 @@ def main(config):
         if block_name == "origin":
             model = Unet(in_ch=channel, out_ch=num_classes, convblock=DoubleConv,
                          super_reso=super_reso, upscale_rate=upscale_rate,
-                         sr_seg_fusion=fusion)
+                         sr_seg_fusion=fusion, sr_layer=5)
         elif block_name == "resblock":
             model = Unet(in_ch=channel, out_ch=num_classes, convblock=ResBlock,
                          super_reso=super_reso, upscale_rate=upscale_rate,
-                         sr_seg_fusion=fusion)
+                         sr_seg_fusion=fusion, sr_layer=5)
         elif block_name == "splatblock":
             model = Unet(in_ch=channel, out_ch=num_classes, convblock=SplAtBlock,
                          super_reso=super_reso, upscale_rate=upscale_rate,
-                         sr_seg_fusion=fusion)
+                         sr_seg_fusion=fusion, sr_layer=5)
         elif block_name == "rrblock":
             model = Unet(in_ch=channel, out_ch=num_classes, convblock=RRBlock,
                          super_reso=super_reso, upscale_rate=upscale_rate,
-                         sr_seg_fusion=fusion)
+                         sr_seg_fusion=fusion, sr_layer=5)
         else:
             raise ValueError("Unknown block name {}".format(block_name))
         model_name = model_name + "_" +block_name
@@ -92,50 +92,51 @@ def main(config):
     resize = Resize(height=out_h, width=out_w, interpolation=cv2.INTER_CUBIC)
     normalize = Normalize([0.5]*channel, [0.5]*channel)
     metric = Metric(num_classes=num_classes)
-    for image_path, mask_path in bar:
-        filename = os.path.basename(image_path)
-        image = cv2.imread(image_path)
-        mask = cv2.imread(mask_path, 0)
-        if divide:
-            mask = mask // 255
-        h, w = image.shape[:2]
-        x = resize(image=image)["image"]
-        if out_w * upscale_rate != w or out_h*upscale_rate != h:
-            hr = Resize(out_h*upscale_rate, width=out_w*upscale_rate)(image=image)["image"]
-        else:
-            hr = image.copy()
-        x = normalize(image=x)["image"]
-        hr = normalize(image=hr)["image"]
-        guidance = None
-        if model_name == "pfseg":
-            crop_w = out_w // 2
-            crop_h = out_h // 2
-            hr_h, hr_w = hr.shape[:2]
-            c_y, c_x = hr_h // 2, hr_w // 2
-            guidance = hr[c_y-crop_h//2:c_y+crop_h//2, c_x-crop_w//2:c_x+crop_w//2, :]
-            guidance = np.transpose(guidance, axes=[2, 0, 1])
-            guidance = torch.from_numpy(guidance)
-            guidance = guidance.to(device, dtype=torch.float32).unsqueeze(0)
-        x = np.transpose(x, axes=[2, 0, 1])
-        if super_reso:
-            hr = np.transpose(hr, axes=[2, 0, 1])
-        x = torch.from_numpy(x).to(device, dtype=torch.float32).unsqueeze(0)
-        mask = torch.from_numpy(mask).to(device)
-        if model_name == "pfseg":
-            pred, sr = model(x, guidance)
-        else:
-            pred = model(x)
-        if num_classes == 1:
-            pred = torch.sigmoid(pred)
-        else:
-            pred = torch.softmax(pred, dim=1)
-        pred = torch.max(pred, dim=1)[1]
-        if out_w != w or out_h != h:
-            # pred = F.interpolate(pred, size=(h,w), mode="nearest")
-            pred = cv2.resize(pred.cpu().squeeze().numpy(), (w, h), interpolation=cv2.INTER_NEAREST)
-            pred = torch.from_numpy(pred).to(device, dtype=torch.long)
-        metric.update(pred, mask.unsqueeze(0))
-        cv2.imwrite(os.path.join(output_dir, filename), pred.cpu().numpy()*255)
+    with torch.no_grad():
+        for image_path, mask_path in bar:
+            filename = os.path.basename(image_path)
+            image = cv2.imread(image_path)
+            mask = cv2.imread(mask_path, 0)
+            if divide:
+                mask = mask // 255
+            h, w = image.shape[:2]
+            x = resize(image=image)["image"]
+            if out_w * upscale_rate != w or out_h*upscale_rate != h:
+                hr = Resize(out_h*upscale_rate, width=out_w*upscale_rate)(image=image)["image"]
+            else:
+                hr = image.copy()
+            x = normalize(image=x)["image"]
+            hr = normalize(image=hr)["image"]
+            guidance = None
+            if model_name == "pfseg":
+                crop_w = out_w // 2
+                crop_h = out_h // 2
+                hr_h, hr_w = hr.shape[:2]
+                c_y, c_x = hr_h // 2, hr_w // 2
+                guidance = hr[c_y-crop_h//2:c_y+crop_h//2, c_x-crop_w//2:c_x+crop_w//2, :]
+                guidance = np.transpose(guidance, axes=[2, 0, 1])
+                guidance = torch.from_numpy(guidance)
+                guidance = guidance.to(device, dtype=torch.float32).unsqueeze(0)
+            x = np.transpose(x, axes=[2, 0, 1])
+            if super_reso:
+                hr = np.transpose(hr, axes=[2, 0, 1])
+            x = torch.from_numpy(x).to(device, dtype=torch.float32).unsqueeze(0)
+            mask = torch.from_numpy(mask).to(device)
+            if model_name == "pfseg":
+                pred, sr = model(x, guidance)
+            else:
+                pred = model(x)
+            if num_classes == 1:
+                pred = torch.sigmoid(pred)
+            else:
+                pred = torch.softmax(pred, dim=1)
+            pred = torch.max(pred, dim=1)[1]
+            if out_w != w or out_h != h:
+                # pred = F.interpolate(pred, size=(h,w), mode="nearest")
+                pred = cv2.resize(pred.cpu().squeeze().numpy(), (w, h), interpolation=cv2.INTER_NEAREST)
+                pred = torch.from_numpy(pred).to(device, dtype=torch.long)
+            metric.update(pred, mask.unsqueeze(0))
+            cv2.imwrite(os.path.join(output_dir, filename), pred.cpu().numpy()*255)
 
     result = metric.evalutate()
     show_metric = ["precision", "acc", "dice", "specifity", "iou", "recall", "mcc", "bm"]
@@ -145,6 +146,13 @@ def main(config):
             result_text += "{}:{} ".format(met, result[met][1].item())
         else:
             result_text += "{}:{} ".format(met, np.mean(result[met].cpu().numpy()))
+    print(result_text)
+    result_text = ""
+    for met in show_metric:
+        if num_classes <=2:
+            result_text += "{} ".format(result[met][1].item())
+        else:
+            result_text += "{} ".format(np.mean(result[met].cpu().numpy()))
     print(result_text)
 
 if __name__ == "__main__":

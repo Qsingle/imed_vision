@@ -6,6 +6,8 @@
     time: 2022/1/15 15:18
     tool: PyCharm
 """
+import glob
+
 import torch
 import torch.nn as nn
 import torch.optim as opt
@@ -21,8 +23,26 @@ import tqdm
 from comm.scheduler.poly import PolyLRScheduler
 from datasets.vessel_segmentation import get_paths, SegPathDataset
 from models.segmentation import Unet, SAUnet, NestedUNet
+from models.unsupervised.unsr import UnUNetV1
 from layers.unet_blocks import *
 from comm.metrics import Metric
+from loss import DiceLoss
+
+def get_ddr_paths(
+        root_dir,
+        split="train",
+        ltype="EX",
+        image_suffix=".jpg",
+        mask_suffix=".tif"
+     ):
+    image_paths = glob.glob(os.path.join(root_dir, split, "image", "*{}".format(image_suffix)))
+    mask_paths = []
+    for image_path in image_paths:
+        filename = os.path.basename(image_path)
+        filename = os.path.splitext(filename)[0]
+        mask_path = os.path.join(root_dir, split, "label", ltype, filename+mask_suffix)
+        mask_paths.append(mask_path)
+    return image_paths, mask_paths
 
 
 def main(config):
@@ -50,6 +70,7 @@ def main(config):
     ckpt_dir = config["ckpt_dir"]
     os.environ["CUDA_VISIBLE_DEVICES"] = gpu_index
     dataset = config["dataset"]
+    crop = config["crop"]
 
     if model_name == "unet":
         if block_name == "origin":
@@ -76,11 +97,35 @@ def main(config):
                            deep_supervision=True)
     elif model_name == "saunet":
         model = SAUnet(in_ch=channel, num_classes=num_classes)
+    elif model_name == "ununetv1":
+        model = UnUNetV1(channel, num_classes=num_classes, upscale_rate=upscale_rate, finetune=True)
+        assert config["pretrained"] != "", "Unsupervised pretrain weights must provide"
+        state = model.state_dict()
+        state.update(torch.load(config["pretrained"], map_location="cpu")["model"])
+        model.load_state_dict(state)
+        model.init_seg_decoder()
     else:
         raise ValueError("Unknown model name {}".format(model_name))
 
-    image_paths, mask_paths = get_paths(image_dir, mask_dir, image_suffix, mask_suffix)
-    train_paths, test_paths, train_mask_paths, test_mask_paths = train_test_split(image_paths, mask_paths, random_state=0, test_size=0.2)
+    if crop and dataset == "hrf":
+        train_range, test_range = train_test_split(list(range(1, 11)), random_state=0, test_size=0.2)
+        train_paths = []
+        for i in train_range:
+            train_paths += glob.glob(os.path.join(image_dir, "{:02d}_*{}".format(i, image_suffix)))
+        train_mask_paths = [os.path.join(mask_dir, os.path.splitext(os.path.basename(p))[0]) + mask_suffix for p in train_paths]
+        test_paths = []
+        for i in test_range:
+            test_paths += glob.glob(os.path.join(image_dir, "{:02d}_*{}".format(i, image_suffix)))
+        test_mask_paths = [os.path.join(mask_dir, os.path.splitext(os.path.basename(p))[0]) + mask_suffix for p in test_paths]
+    elif dataset == "ddr":
+        train_paths, train_mask_paths = get_ddr_paths(image_dir, "train", ltype=config["ltype"],
+                                                      image_suffix=image_suffix, mask_suffix=mask_suffix)
+        test_paths, test_mask_paths = get_ddr_paths(image_dir, "valid", ltype=config["ltype"],
+                                                    image_suffix=image_suffix, mask_suffix=mask_suffix)
+    else:
+        image_paths, mask_paths = get_paths(image_dir, mask_dir, image_suffix, mask_suffix)
+        train_paths, test_paths, train_mask_paths, test_mask_paths = train_test_split(image_paths, mask_paths,
+                                                                                      random_state=0, test_size=0.2)
     train_dataset = SegPathDataset(train_paths, train_mask_paths, augmentation=True,
                                    output_size=image_size, super_reso=super_reso,
                                    upscale_rate=upscale_rate, divide=divide)
@@ -105,7 +150,7 @@ def main(config):
         os.makedirs(os.path.join(ckpt_dir, model_name, dataset))
         ckpt_dir = os.path.join(ckpt_dir, model_name, dataset)
         with open(os.path.join(ckpt_dir, "train_config.json"), "w") as f:
-            json.dump(config, f)
+            json.dump(config, f, indent=4)
     else:
         if not os.path.exists(os.path.join(ckpt_dir, model_name, dataset)):
             os.makedirs(os.path.join(ckpt_dir, model_name, dataset))
@@ -115,7 +160,10 @@ def main(config):
 
     if super_reso:
         sr_loss = nn.MSELoss()
+    # if fusion:
+    #     fusion_loss = FALoss()
     seg_loss = nn.CrossEntropyLoss()
+    dice_loss = DiceLoss()
     train_metric = Metric(num_classes)
     test_metric = Metric(num_classes)
     global_step = 0
@@ -142,11 +190,13 @@ def main(config):
             fusion_seg = None
             fusion_sr = None
             sr = None
-            if len(pred) == 2:
-                pred, sr = pred
-            elif len(pred) == 4:
-                pred, sr, fusion_seg, fusion_sr = pred
-            loss = seg_loss(pred, mask)
+            if isinstance(pred, tuple):
+                if len(pred) == 2:
+                    pred, sr = pred
+                elif len(pred) == 4:
+                    pred, sr, fusion_seg, fusion_sr = pred
+            # print(pred.shape)
+            loss = seg_loss(pred, mask) + dice_loss(pred, mask)
             if super_reso:
                 if sr is not None:
                     loss += sr_loss(sr, hr)
@@ -154,6 +204,9 @@ def main(config):
                     loss += sr_loss(fusion_sr, hr)
                 if fusion_seg is not None:
                     loss += seg_loss(fusion_seg, mask)
+                    loss += dice_loss(fusion_seg, mask)
+                # if fusion_sr is not None and fusion_seg is not None:
+                #     loss += fusion_loss(fusion_seg, fusion_sr)
             loss.backward()
             optimizer.step()
             sche.step()

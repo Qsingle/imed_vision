@@ -1,0 +1,19 @@
+{
+  "init_lr" : 0.01,
+  "momentum" : 0.9,
+  "weight_decay": 5e-4,
+  "root" : "/data0/qiuzhongxi/datasets/messidor/images/",
+  "image_suffix": ".tif",
+  "epochs": 300,
+  "lr_sche": "poly",
+  "image_size": [774, 1280],
+  "num_classes": 2,
+  "gpu_index": "0",
+  "model_name": "ununet",
+  "channel": 3,
+  "upscale_rate": 8,
+  "num_workers": 4,
+  "ckpt_dir": "./ckpt",
+  "dataset": "messidor",
+  "batch_size": 8
+}

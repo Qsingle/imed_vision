@@ -6,3 +6,7 @@
     time: 2022/1/30 10:42
     tool: PyCharm
 """
+from .ssim import SSIMLoss
+from .dice import DiceLoss
+from .fa_loss import FALoss
+from .tfm import TFM

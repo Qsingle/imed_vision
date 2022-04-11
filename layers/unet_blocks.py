@@ -12,9 +12,16 @@ import torch.nn.functional as F
 
 from .utils import Conv2d
 from .splat import SplAtConv2d
+from .dropout import DropPath
+try:
+    from torch.nn import LayerNorm
+except:
+    from .layernorm import LayerNorm
 
 __all__ = ["DoubleConv3D", "Downsample3D", "Upsample3D", "AttentionBlock", "VGGBlock", "Upsample",
-           "DoubleConv", "Downsample", "SplAtBlock", "RRBlock", "ResBlock"]
+           "DoubleConv", "Downsample", "SplAtBlock", "RRBlock", "ResBlock", "ConvNeXtBlock"]
+
+
 
 class DoubleConv3D(nn.Module):
     def __init__(self, in_ch, out_ch):
@@ -81,7 +88,7 @@ class AttentionBlock(nn.Module):
 class DoubleConv(nn.Module):
     def __init__(self, in_ch, out_ch, num_current=2, radix=2, drop_prob=0.0, dilation=1, padding=1, expansion=1.0,
                  reduction=4, norm_layer=nn.BatchNorm2d, activation=nn.ReLU(inplace=True),
-                 avd=False, avd_first=False):
+                 avd=False, avd_first=False, **kwargs):
         """
         Implmentation of Unet's double 3x3 conv.
         References:
@@ -154,7 +161,7 @@ class Upsample(nn.Module):
     def __init__(self, in_ch1, in_ch2,out_ch, convblock=DoubleConv,
                  radix=2, drop_prob=0.0, dilation=1, padding=1, expansion=1.0,
                  reduction=4, norm_layer=nn.BatchNorm2d, activation=nn.ReLU(inplace=True),
-                 avd=False, avd_first=False, num_current=2):
+                 avd=False, avd_first=False, num_current=2, **kwargs):
         """
         Upsample part with different conv block.
         References:
@@ -180,7 +187,7 @@ class Upsample(nn.Module):
         self.upsample_conv = Conv2d(in_ch1, out_ch, norm_layer=norm_layer, activation=activation)
         self.conv = convblock(out_ch+in_ch2, out_ch, norm_layer=norm_layer, activation=activation,
                               radix=radix, drop_prob=drop_prob, dilation=dilation, padding=padding,
-                              reduction=reduction, expansion=expansion, num_current=num_current)
+                              reduction=reduction, expansion=expansion, num_current=num_current, **kwargs)
 
     def forward(self, x, x1):
         net = F.interpolate(x, size=x1.size()[2:], mode="bilinear", align_corners=True)
@@ -193,7 +200,7 @@ class Upsample(nn.Module):
 class  ResBlock(nn.Module):
     def __init__(self, in_ch, out_ch, radix=2, drop_prob=0.0, dilation=1, padding=1, expansion=1.0,
                  reduction=4, norm_layer=nn.BatchNorm2d, activation=nn.ReLU(inplace=True),
-                 avd=False, avd_first=False, num_current=2):
+                 avd=False, avd_first=False, num_current=2, **kwargs):
         """
         Implementation of ResNet's block.
         References:
@@ -236,7 +243,7 @@ class  ResBlock(nn.Module):
 
 class RConv(nn.Module):
     def __init__(self, out_ch, num_recurrent=2, norm_layer=nn.BatchNorm2d,
-                 activation=nn.ReLU(inplace=True)):
+                 activation=nn.ReLU(inplace=True), **kwargs):
         """
         Recurrent conv.
         References:
@@ -263,7 +270,7 @@ class RConv(nn.Module):
 class RRBlock(nn.Module):
     def __init__(self, in_ch, out_ch, num_current=2, radix=2, drop_prob=0.0, dilation=1,
                  padding=1, expansion=3, reduction=4, norm_layer=nn.BatchNorm2d,
-                 activation=nn.ReLU(inplace=True), avd=False, avd_first=False):
+                 activation=nn.ReLU(inplace=True), avd=False, avd_first=False, **kwargs):
         """
         Recurrent block in R2Unet.
         References:
@@ -303,7 +310,7 @@ class RRBlock(nn.Module):
 class SplAtBlock(nn.Module):
     def __init__(self, in_ch, out_ch, radix=2, drop_prob=0.0, dilation=1, padding=1, expansion=3,
                  reduction=4, norm_layer=nn.BatchNorm2d, activation=nn.ReLU(inplace=True),
-                 avd=False, avd_first=False, num_current=2):
+                 avd=False, avd_first=False, num_current=2, **kwargs):
         """
         Implementation of block with Split Attention Module.
         References:
@@ -351,6 +358,28 @@ class SplAtBlock(nn.Module):
         net = self.conv3(net)
         net = identify + net
         net = self.activation(net) if self.activation is not None else net
+        return net
+
+class ConvNeXtBlock(nn.Module):
+    def __init__(self, in_ch, **kwargs):
+        super(ConvNeXtBlock, self).__init__()
+        self.conv1 = nn.Conv2d(in_ch, in_ch, kernel_size=7, stride=1, padding=3, groups=in_ch, bias=False)
+        self.layernorm = LayerNorm(in_ch, eps=1e-6)
+        self.conv2 = nn.Conv2d(in_ch, in_ch*4, kernel_size=1, stride=1, padding=0)
+        self.conv3 = nn.Conv2d(in_ch*4, in_ch, kernel_size=1, stride=1, padding=0)
+        self.activation = nn.GELU()
+        drouppath_rate = kwargs.get("dropout_rate", 0)
+        self.identity = DropPath(drouppath_rate) if drouppath_rate > 0. else nn.Identity()
+
+    def forward(self, x):
+        net = self.conv1(x)
+        net = net.permute(0, 2, 3, 1)
+        net = self.layernorm(net)
+        net = net.permute(0, 3, 1, 2)
+        net = self.conv2(net)
+        net = self.activation(net)
+        net = self.conv3(net)
+        net = x + self.identity(net)
         return net
 
 VGGBlock = DoubleConv
