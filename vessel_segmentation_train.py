@@ -25,6 +25,7 @@ from datasets.vessel_segmentation import get_paths, SegPathDataset
 from models.segmentation import Unet, SAUnet, NestedUNet
 from models.unsupervised.unsr import UnUNetV1
 from layers.unet_blocks import *
+from models.segmentation import ConvNeXtUNet
 from comm.metrics import Metric
 from loss import DiceLoss
 
@@ -104,6 +105,8 @@ def main(config):
         state.update(torch.load(config["pretrained"], map_location="cpu")["model"])
         model.load_state_dict(state)
         model.init_seg_decoder()
+    elif model_name.lower() == "convnextunet":
+        model = ConvNeXtUNet(channel, num_classes)
     else:
         raise ValueError("Unknown model name {}".format(model_name))
 
@@ -203,8 +206,8 @@ def main(config):
                 if fusion_sr is not None:
                     loss += sr_loss(fusion_sr, hr)
                 if fusion_seg is not None:
-                    loss += seg_loss(fusion_seg, mask)
-                    loss += dice_loss(fusion_seg, mask)
+                    loss += seg_loss(fusion_seg, mask) + dice_loss(pred, mask)
+                    # loss += dice_loss(fusion_seg, mask)
                 # if fusion_sr is not None and fusion_seg is not None:
                 #     loss += fusion_loss(fusion_seg, fusion_sr)
             loss.backward()
