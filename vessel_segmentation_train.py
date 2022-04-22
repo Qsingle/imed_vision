@@ -28,6 +28,7 @@ from layers.unet_blocks import *
 from models.segmentation import ConvNeXtUNet
 from comm.metrics import Metric
 from loss import DiceLoss
+from loss import FALoss
 
 def get_ddr_paths(
         root_dir,
@@ -72,6 +73,7 @@ def main(config):
     os.environ["CUDA_VISIBLE_DEVICES"] = gpu_index
     dataset = config["dataset"]
     crop = config["crop"]
+    distance = config["distance"]
 
     if model_name == "unet":
         if block_name == "origin":
@@ -131,10 +133,10 @@ def main(config):
                                                                                       random_state=0, test_size=0.2)
     train_dataset = SegPathDataset(train_paths, train_mask_paths, augmentation=True,
                                    output_size=image_size, super_reso=super_reso,
-                                   upscale_rate=upscale_rate, divide=divide)
+                                   upscale_rate=upscale_rate, divide=divide, distance=distance)
     test_dataset = SegPathDataset(test_paths, test_mask_paths, augmentation=False,
                                   output_size=image_size, super_reso=super_reso,
-                                  upscale_rate=upscale_rate, divide=divide)
+                                  upscale_rate=upscale_rate, divide=divide, distance=False)
     train_loader = DataLoader(train_dataset, batch_size=batch_size, num_workers=num_workers, shuffle=True, pin_memory=True)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, num_workers=num_workers, shuffle=False, pin_memory=True)
 
@@ -166,7 +168,7 @@ def main(config):
     # if fusion:
     #     fusion_loss = FALoss()
     seg_loss = nn.CrossEntropyLoss()
-    dice_loss = DiceLoss()
+    # dice_loss = DiceLoss()
     train_metric = Metric(num_classes)
     test_metric = Metric(num_classes)
     global_step = 0
@@ -179,11 +181,20 @@ def main(config):
         iteration = 0
         model.train()
         for data in bar:
+            distance_mask = None
             if super_reso:
-                x, hr, mask = data
+                if distance:
+                    x, hr, mask, distance_mask = data
+                    distance_mask = distance_mask.to(device)
+                else:
+                    x, hr, mask, distance_mask = data
                 hr = hr.to(device)
             else:
-                x, mask = data
+                if distance:
+                    x, mask, distance_mask = data
+                    distance_mask = distance_mask.to(device)
+                else:
+                    x, mask = data
             x = x.to(device, dtype=torch.float32)
             mask = mask.to(device, dtype=torch.long if isinstance(seg_loss, nn.CrossEntropyLoss) else torch.float32)
             optimizer.zero_grad()
@@ -199,14 +210,16 @@ def main(config):
                 elif len(pred) == 4:
                     pred, sr, fusion_seg, fusion_sr = pred
             # print(pred.shape)
-            loss = seg_loss(pred, mask) + dice_loss(pred, mask)
+            if distance:
+                pred = distance_mask * pred
+            loss = seg_loss(pred, mask)
             if super_reso:
                 if sr is not None:
                     loss += sr_loss(sr, hr)
                 if fusion_sr is not None:
                     loss += sr_loss(fusion_sr, hr)
                 if fusion_seg is not None:
-                    loss += seg_loss(fusion_seg, mask) + dice_loss(pred, mask)
+                    loss += seg_loss(fusion_seg+pred, mask)
                     # loss += dice_loss(fusion_seg, mask)
                 # if fusion_sr is not None and fusion_seg is not None:
                 #     loss += fusion_loss(fusion_seg, fusion_sr)

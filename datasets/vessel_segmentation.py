@@ -12,7 +12,7 @@ import os
 import glob
 from typing import Union,List
 from albumentations import Compose, ColorJitter, HorizontalFlip
-from albumentations import ChannelDropout, GaussianBlur, VerticalFlip
+from albumentations import GaussianBlur, VerticalFlip, RandomCrop
 from albumentations import Normalize, Resize, ShiftScaleRotate
 import cv2
 from PIL import Image
@@ -50,7 +50,8 @@ class SegPathDataset(Dataset):
                  augmentation:bool=False,
                  output_size:Union[int,tuple,list]=512,
                  super_reso:bool=False, upscale_rate:int=2,
-                 divide=False, inter=cv2.INTER_CUBIC):
+                 divide=False, inter=cv2.INTER_CUBIC,
+                 distance=False):
         self.image_paths = image_paths
         self.mask_paths = mask_paths
         assert len(self.image_paths) == len(self.mask_paths), "Length for list of image paths must be" \
@@ -64,6 +65,7 @@ class SegPathDataset(Dataset):
         self.upscale_rate = upscale_rate
         self.divide = divide
         self.inter = inter
+        self.distance = distance
 
     def __len__(self):
         return len(self.image_paths)
@@ -79,10 +81,11 @@ class SegPathDataset(Dataset):
             mask = cv2.imread(mask_path, 0)
         if self.divide:
             mask = mask // 255
-        h, w = image.shape[:2]
+        out_h, out_w = self.output_size
         if self.augmentation:
             aug_task = [
-                ChannelDropout(),
+                # ChannelDropout(),
+                # ColorJitter(contrast=0.4, hue=0.1, brightness=0.4, saturation=0.4),
                 ColorJitter(),
                 HorizontalFlip(),
                 VerticalFlip(),
@@ -93,12 +96,17 @@ class SegPathDataset(Dataset):
             aug_data = aug(image=image, mask=mask)
             image = aug_data["image"]
             mask = aug_data["mask"]
-        out_h, out_w = self.output_size
+            crop = RandomCrop(height=int(out_h * self.upscale_rate), width=int(out_w * self.upscale_rate))
+            crop_data = crop(image=image, mask=mask)
+            image = crop_data["image"]
+            mask = crop_data["mask"]
+        h, w = image.shape[:2]
+
         hr = None
         if self.super_reso:
             if out_h * self.upscale_rate != h or out_w * self.upscale_rate != w:
                 hr_re = Resize(out_h*self.upscale_rate, out_w*self.upscale_rate,
-                               interpolation=self.inter)(image=image, mask=mask)
+                               interpolation=cv2.INTER_CUBIC)(image=image, mask=mask)
                 hr = hr_re["image"]
                 mask = hr_re["mask"]
             else:
@@ -106,6 +114,8 @@ class SegPathDataset(Dataset):
         re = Resize(out_h, out_w, interpolation=self.inter)
         re_data = re(image=image, mask=mask)
         image = re_data["image"]
+        # gaussian_data = gaussian(image=image)
+        # image = gaussian_data["image"]
         if hr is None:
             mask = re_data["mask"]
         if image.ndim > 2:
@@ -126,6 +136,14 @@ class SegPathDataset(Dataset):
             image = np.transpose(image, axes=[2, 0, 1])
             if hr is not None:
                 hr = np.transpose(hr, axes=[2, 0, 1])
+        distance_mask = None
+        if self.distance:
+            distance_mask = cv2.distanceTransform(mask, cv2.DIST_L2)
+            distance_mask = (distance_mask - distance_mask.min()) / (distance_mask.max() - distance_mask.min() + 1e-6)
         if hr is None:
+            if distance_mask is not None:
+                return torch.from_numpy(image), torch.from_numpy(mask), torch.from_numpy(distance_mask)
             return torch.from_numpy(image), torch.from_numpy(mask)
-        return torch.from_numpy(image), torch.from_numpy(hr), torch.from_numpy(mask)
+        if distance_mask is None:
+            return torch.from_numpy(image), torch.from_numpy(hr), torch.from_numpy(mask)
+        return torch.from_numpy(image), torch.from_numpy(hr), torch.from_numpy(mask), torch.from_numpy(distance_mask)
