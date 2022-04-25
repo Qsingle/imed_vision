@@ -20,7 +20,7 @@ def dice_coff(output:torch.Tensor, target:torch.Tensor, smooth=0.0):
         torch.Tensor: dice coefficient
     """
     ns = output.size()[1]
-    if ns > 2:
+    if ns >= 2:
         target_onehot = torch.zeros_like(output, device=output.device, dtype=torch.float32)
         target_onehot.scatter_(1, target.unsqueeze(1), 1)
         output = torch.softmax(output, dim=1)
