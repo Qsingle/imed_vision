@@ -12,3 +12,5 @@ from .encnet import *
 from .saunet import SAUnet
 from .deeplab import *
 from .pfseg import PFSeg
+from .convnextunet import ConvNeXtUNet
+from .segformer import *

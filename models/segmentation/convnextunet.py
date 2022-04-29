@@ -21,11 +21,11 @@ from layers import ConvNeXtBlock
 # sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 class Downsample(nn.Module):
-    def __init__(self, in_ch, out_ch, num_blocks=3):
+    def __init__(self, in_ch, out_ch, num_blocks=3, drop_path_rate=0.):
         super(Downsample, self).__init__()
         blcks = []
         for i in range(num_blocks):
-            blcks.append(ConvNeXtBlock(in_ch))
+            blcks.append(ConvNeXtBlock(in_ch, dropout_rate=drop_path_rate))
         self.conv1 = nn.Sequential(*blcks)
         self.down = nn.Conv2d(in_ch, out_ch, kernel_size=2, stride=2)
 
@@ -35,13 +35,13 @@ class Downsample(nn.Module):
         return feature, down
 
 class Upsample(nn.Module):
-    def __init__(self, in_ch1, in_ch2, out_ch):
+    def __init__(self, in_ch1, in_ch2, out_ch, drop_path_rate=0.):
         super(Upsample, self).__init__()
         self.upsample_conv = nn.Conv2d(in_ch1, out_ch, 1, 1, 0)
         self.conv = nn.Sequential(
             nn.Conv2d(out_ch+in_ch2, out_ch, 1, 1, 0),
-            ConvNeXtBlock(out_ch),
-            ConvNeXtBlock(out_ch),
+            ConvNeXtBlock(out_ch, dropout_rate=drop_path_rate),
+            ConvNeXtBlock(out_ch, dropout_rate=drop_path_rate),
         )
 
     def forward(self, fe1, fe2):
@@ -52,18 +52,18 @@ class Upsample(nn.Module):
         return out
 
 class ConvNeXtUNet(nn.Module):
-    def __init__(self, in_ch, num_classes=2, num_blocks=[3, 3, 9, 3], dims=[96, 192, 384, 768]):
+    def __init__(self, in_ch, num_classes=2, num_blocks=[3, 3, 9, 3], dims=[96, 192, 384, 768], drop_path_rate=0.):
         super(ConvNeXtUNet, self).__init__()
         self.stem = nn.Conv2d(in_ch, dims[0], 4, stride=2, padding=1)
-        self.down1 = Downsample(dims[0], dims[1], num_blocks[0])
-        self.down2 = Downsample(dims[1], dims[2], num_blocks[1])
-        self.down3 = Downsample(dims[2], dims[3], num_blocks[2])
+        self.down1 = Downsample(dims[0], dims[1], num_blocks[0], drop_path_rate)
+        self.down2 = Downsample(dims[1], dims[2], num_blocks[1], drop_path_rate)
+        self.down3 = Downsample(dims[2], dims[3], num_blocks[2], drop_path_rate)
         self.down4 = nn.Sequential(
-            *[ConvNeXtBlock(dims[3]) for _ in range(num_blocks[3])]
+            *[ConvNeXtBlock(dims[3], dropout_rate=drop_path_rate) for _ in range(num_blocks[3])]
         )
-        self.up5 = Upsample(dims[3], dims[2], dims[2])
-        self.up6 = Upsample(dims[2], dims[1], dims[1])
-        self.up7 = Upsample(dims[1], dims[0], dims[0])
+        self.up5 = Upsample(dims[3], dims[2], dims[2], drop_path_rate)
+        self.up6 = Upsample(dims[2], dims[1], dims[1], drop_path_rate)
+        self.up7 = Upsample(dims[1], dims[0], dims[0], drop_path_rate)
         self.out_conv = nn.Sequential(
             nn.Conv2d(dims[0], dims[0]*4, 1, 1, 0),
             nn.Conv2d(dims[0]*4, dims[0], 1, 1, 0),

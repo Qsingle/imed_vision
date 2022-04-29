@@ -21,7 +21,6 @@ from layers.spatial_fusion import SpatialFusion
 
 __all__ = ["Unet", "NestedUNet", "AttUnet"]
 
-
 class Unet(nn.Module):
     def __init__(self, in_ch, out_ch, convblock=DoubleConv, expansion=1.0,
                  radix=2, drop_prob=0.0, reduction=4, norm_layer=nn.BatchNorm2d,
@@ -173,6 +172,7 @@ class Unet(nn.Module):
             if self.sr_seg_fusion:
                 fusion = self.sr_seg_fusion_module(sr, out)
                 fusion_seg = fusion*out + out
+                # fusion_sr = fusion*sr
 
         # out = torch.max(out, dim=1)[1]
         if self.super_reso and self.training:

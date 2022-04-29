@@ -370,6 +370,7 @@ class ConvNeXtBlock(nn.Module):
         self.activation = nn.GELU()
         drouppath_rate = kwargs.get("dropout_rate", 0)
         self.identity = DropPath(drouppath_rate) if drouppath_rate > 0. else nn.Identity()
+        self.post_norm = LayerNorm(in_ch, eps=1e-6)
 
     def forward(self, x):
         net = self.conv1(x)
@@ -379,6 +380,7 @@ class ConvNeXtBlock(nn.Module):
         net = self.conv2(net)
         net = self.activation(net)
         net = self.conv3(net)
+        net = self.post_norm(net.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)
         net = x + self.identity(net)
         return net
 
