@@ -8,6 +8,7 @@
 """
 from itertools import repeat
 import collections.abc
+import functools
 
 def to_tuple(input, n):
     """
@@ -25,3 +26,6 @@ def to_tuple(input, n):
         value = tuple(spatial_axis)
         return value
     return tuple(repeat(input, n))
+
+_pair = functools.partial(to_tuple, n=2)
+
