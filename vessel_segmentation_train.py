@@ -26,9 +26,12 @@ from models.segmentation import Unet, SAUnet, NestedUNet
 from models.unsupervised.unsr import UnUNetV1
 from layers.unet_blocks import *
 from models.segmentation import ConvNeXtUNet
+from models.segmentation.segformer import *
 from comm.metrics import Metric
+from loss import IBLoss
 from loss import DiceLoss
 from loss import FALoss
+from loss.distance_loss import DisPenalizedCE
 
 def get_ddr_paths(
         root_dir,
@@ -109,6 +112,8 @@ def main(config):
         model.init_seg_decoder()
     elif model_name.lower() == "convnextunet":
         model = ConvNeXtUNet(channel, num_classes)
+    elif model_name.lower() == "segformer":
+        model = segformer_b0(img_size=image_size[0], num_classes=num_classes)
     else:
         raise ValueError("Unknown model name {}".format(model_name))
 
@@ -133,10 +138,10 @@ def main(config):
                                                                                       random_state=0, test_size=0.2)
     train_dataset = SegPathDataset(train_paths, train_mask_paths, augmentation=True,
                                    output_size=image_size, super_reso=super_reso,
-                                   upscale_rate=upscale_rate, divide=divide, distance=distance)
+                                   upscale_rate=upscale_rate, divide=divide)
     test_dataset = SegPathDataset(test_paths, test_mask_paths, augmentation=False,
                                   output_size=image_size, super_reso=super_reso,
-                                  upscale_rate=upscale_rate, divide=divide, distance=False)
+                                  upscale_rate=upscale_rate, divide=divide)
     train_loader = DataLoader(train_dataset, batch_size=batch_size, num_workers=num_workers, shuffle=True, pin_memory=True)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, num_workers=num_workers, shuffle=False, pin_memory=True)
 
@@ -154,13 +159,12 @@ def main(config):
         os.makedirs(ckpt_dir)
         os.makedirs(os.path.join(ckpt_dir, model_name, dataset))
         ckpt_dir = os.path.join(ckpt_dir, model_name, dataset)
-        with open(os.path.join(ckpt_dir, "train_config.json"), "w") as f:
-            json.dump(config, f, indent=4)
     else:
         if not os.path.exists(os.path.join(ckpt_dir, model_name, dataset)):
             os.makedirs(os.path.join(ckpt_dir, model_name, dataset))
         ckpt_dir = os.path.join(ckpt_dir, model_name, dataset)
-
+    with open(os.path.join(ckpt_dir, "train_config.json"), "w") as f:
+        json.dump(config, f, indent=4)
     writer = SummaryWriter(comment=model_name+"_"+dataset)
 
     if super_reso:
@@ -168,6 +172,8 @@ def main(config):
     # if fusion:
     #     fusion_loss = FALoss()
     seg_loss = nn.CrossEntropyLoss()
+    if distance:
+        seg_loss = DisPenalizedCE()
     # dice_loss = DiceLoss()
     train_metric = Metric(num_classes)
     test_metric = Metric(num_classes)
@@ -181,20 +187,11 @@ def main(config):
         iteration = 0
         model.train()
         for data in bar:
-            distance_mask = None
             if super_reso:
-                if distance:
-                    x, hr, mask, distance_mask = data
-                    distance_mask = distance_mask.to(device)
-                else:
-                    x, hr, mask, distance_mask = data
+                x, hr, mask = data
                 hr = hr.to(device)
             else:
-                if distance:
-                    x, mask, distance_mask = data
-                    distance_mask = distance_mask.to(device)
-                else:
-                    x, mask = data
+                x, mask = data
             x = x.to(device, dtype=torch.float32)
             mask = mask.to(device, dtype=torch.long if isinstance(seg_loss, nn.CrossEntropyLoss) else torch.float32)
             optimizer.zero_grad()
@@ -210,8 +207,6 @@ def main(config):
                 elif len(pred) == 4:
                     pred, sr, fusion_seg, fusion_sr = pred
             # print(pred.shape)
-            if distance:
-                pred = distance_mask * pred
             loss = seg_loss(pred, mask)
             if super_reso:
                 if sr is not None:
@@ -220,6 +215,8 @@ def main(config):
                     loss += sr_loss(fusion_sr, hr)
                 if fusion_seg is not None:
                     loss += seg_loss(fusion_seg+pred, mask)
+                # if distance:
+                #     pass
                     # loss += dice_loss(fusion_seg, mask)
                 # if fusion_sr is not None and fusion_seg is not None:
                 #     loss += fusion_loss(fusion_seg, fusion_sr)
@@ -228,7 +225,7 @@ def main(config):
             sche.step()
             losses += loss.item()
             pred = torch.softmax(pred, dim=1)
-            train_metric.update(pred, mask)
+            train_metric.update(pred, mask.to(dtype=torch.long))
             result = train_metric.evalutate()
             show_metric = ["acc", "recall", "iou"]
             # if num_classes == 2:
@@ -253,7 +250,7 @@ def main(config):
                 mask = mask.to(device, dtype=torch.long if isinstance(seg_loss, nn.CrossEntropyLoss) else torch.float32)
                 pred = model(x)
                 pred = torch.softmax(pred, dim=1)
-                test_metric.update(pred, mask)
+                test_metric.update(pred, mask.to(dtype=torch.long))
             show_metric = ["acc", "recall", "iou", "recall", "precision", "specifity", "dice"]
             result = test_metric.evalutate()
             result_text = ""
