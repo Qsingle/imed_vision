@@ -23,5 +23,6 @@
   "dataset": "hrf",
   "batch_size": 2,
   "crop": true,
-  "pretrained": "/data0/qiuzhongxi/codes/imed_vision/ckpt/ununetv1/messidor/ununetv1_messidor_last.pth"
+  "pretrained": "/data0/qiuzhongxi/codes/imed_vision/ckpt/ununetv1/messidor/ununetv1_messidor_last.pth",
+  "pretrain": false
 }

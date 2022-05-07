@@ -113,7 +113,10 @@ def main(config):
     elif model_name.lower() == "convnextunet":
         model = ConvNeXtUNet(channel, num_classes)
     elif model_name.lower() == "segformer":
-        model = segformer_b0(img_size=image_size[0], num_classes=num_classes)
+        pretrain = config["pretrain"]
+        pretrained_model = config["pretrained"]
+        model = segformer_b0(img_size=image_size[0], num_classes=num_classes,
+                             pretrain=pretrain, pretrained_model=pretrained_model)
     else:
         raise ValueError("Unknown model name {}".format(model_name))
 

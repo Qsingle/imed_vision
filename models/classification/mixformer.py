@@ -18,6 +18,7 @@ import torch.nn as nn
 from torch.nn.init import trunc_normal_
 from functools import partial
 import torch.nn.functional as F
+from collections import OrderedDict
 
 from layers.mix_transformer_layers import *
 
@@ -27,7 +28,8 @@ class MixTransformer(nn.Module):
     def __init__(self, img_size=224, in_chans=3, num_classes=1000, embed_dims=[64, 128, 256, 512],
                  num_heads=[1, 2, 4, 8], mlp_ratios=[4, 4, 4, 4], qkv_bias=False, qk_scale=None, drop_rate=0.,
                  attn_drop_rate=0., drop_path_rate=0., norm_layer=nn.LayerNorm,
-                 depths=[3, 4, 6, 3], sr_ratios=[8, 4, 2, 1], global_pool='avg'):
+                 depths=[3, 4, 6, 3], sr_ratios=[8, 4, 2, 1], global_pool='avg',
+                 pretrain=False, pretrained_model=None):
         super(MixTransformer, self).__init__()
         self.num_classes = num_classes
         self.depths = depths
@@ -80,6 +82,22 @@ class MixTransformer(nn.Module):
         self.head = nn.Linear(embed_dims[3], num_classes)
         self.global_pool = global_pool
         self.apply(self._init_weights)
+        #pretrain
+        if pretrain:
+            assert pretrained_model is not None, "Please give the path of the pretrained model"
+            self.load_check_point(pretrained_model)
+
+    def load_check_point(self, path):
+        state = torch.load(path, map_location="cpu")
+        print("Loading pretrained model from {}".format(path))
+        try:
+            self.load_state_dict(state)
+        except:
+            new_state = OrderedDict()
+            for k, v in state.items():
+                if "head" not in k:
+                    new_state[k] = v
+            self.state_dict().update(new_state)
 
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
