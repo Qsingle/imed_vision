@@ -506,15 +506,31 @@ class ResNet(nn.Module):
                       reduction=reduction, semodule=semodule, drop_path_rate=drop_path_rate))
         return nn.Sequential(*layers)
 
-    def forward(self, x):
-        # 执行计算的部分,构图,前向计算
+    def forward_features(self, x):
+        features = []
         net = self.conv1(x)
         net = self.max_pool(net)
         net = self.layer1(net)
+        features.append(net)
         net = self.layer2(net)
+        features.append(net)
         net = self.layer3(net)
+        features.append(net)
         net = self.layer4(net)
-        net = self.avg_pool(net)
+        features.append(net)
+        return features
+
+
+    def forward(self, x):
+        # 执行计算的部分,构图,前向计算
+        # net = self.conv1(x)
+        # net = self.max_pool(net)
+        # net = self.layer1(net)
+        # net = self.layer2(net)
+        # net = self.layer3(net)
+        # net = self.layer4(net)
+        features = self.forward_features(x)
+        net = self.avg_pool(features[-1])
         net = self.fc(net)
         return net
 

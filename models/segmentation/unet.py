@@ -18,6 +18,7 @@ import torch.nn.functional as F
 from layers.unet_blocks import *
 from layers.superpixel import SuperResolutionModule
 from layers.spatial_fusion import SpatialFusion
+from layers.task_fusion import LinearFusion
 
 __all__ = ["Unet", "NestedUNet", "AttUnet"]
 
@@ -127,7 +128,8 @@ class Unet(nn.Module):
             )
             self.sr_seg_fusion = sr_seg_fusion
             if sr_seg_fusion:
-                self.sr_seg_fusion_module = SpatialFusion(in_ch, out_ch)
+                # self.sr_seg_fusion_module = SpatialFusion(in_ch, out_ch)
+                self.sr_seg_fusion_module = LinearFusion(64, 64)
                 # self.fusion_mlp = nn.Sequential(
                 #     nn.Conv2d(out_ch, 32, 1, 1),
                 #     nn.ReLU(),
@@ -170,8 +172,9 @@ class Unet(nn.Module):
 
             sr = self.sr_module(sr_up9)
             if self.sr_seg_fusion:
-                fusion = self.sr_seg_fusion_module(sr, out)
-                fusion_seg = fusion*out + out
+                # fusion = self.sr_seg_fusion_module(sr, out)
+                # fusion_seg = fusion*out + out
+                fusion_sr, fusion_seg = self.sr_seg_fusion_module(sr_up9, up9)
                 # fusion_sr = fusion*sr
 
         # out = torch.max(out, dim=1)[1]

@@ -73,7 +73,11 @@ class ASPP(nn.Module):
                               activation=activation)
         self.branch5 = ImagePooling(in_planes, 256)
 
-        self.conv = Conv2d(1280, out_ch, 1, stride=1, padding=0)
+        self.conv = nn.Sequential(
+            Conv2d(1280, out_ch, 1, stride=1, padding=0),
+            nn.BatchNorm2d(out_ch),
+            nn.ReLU(inplace=True)
+        )
 
     def forward(self, x):
         branch1 = self.branch1(x)
@@ -81,7 +85,7 @@ class ASPP(nn.Module):
         branch3 = self.branch3(x)
         branch4 = self.branch4(x)
         branch5 = self.branch5(x)
-        branch5 = F.interpolate(branch5, size=branch4.size()[2:], mode="bilinear", align_corners=True)
+        branch5 = F.interpolate(branch5, size=branch4.size()[2:], mode="bilinear", align_corners=False)
         concat = torch.cat([branch1, branch2, branch3, branch4, branch5], dim=1)
         conv = self.conv(concat)
         return conv
@@ -110,15 +114,16 @@ class DeeplabV3(nn.Module):
 
     def forward(self, x):
         size = x.size()[2:]
-        net = self.backbone.conv1(x)
-        net = self.backbone.max_pool(net)
-        net = self.backbone.layer1(net)
-        net = self.backbone.layer2(net)
-        net = self.backbone.layer3(net)
-        net = self.backbone.layer4(net)
-        net = self.aspp(net)
+        # net = self.backbone.conv1(x)
+        # net = self.backbone.max_pool(net)
+        # net = self.backbone.layer1(net)
+        # net = self.backbone.layer2(net)
+        # net = self.backbone.layer3(net)
+        # net = self.backbone.layer4(net)
+        features = self.backbone.forward_features(x)
+        net = self.aspp(features[-1])
         net = self.conv5(net)
-        net = F.interpolate(net, size=size, mode="bilinear", align_corners=True)
+        net = F.interpolate(net, size=size, mode="bilinear", align_corners=False)
         return net
 
 class RCAB(nn.Module):
@@ -164,7 +169,7 @@ class Decoder(nn.Module):
 
     def forward(self, low_fe, high_fe):
         low_fe = self.conv_low(low_fe)
-        high_fe = F.interpolate(high_fe, size=low_fe.size()[2:], mode="bilinear", align_corners=True)
+        high_fe = F.interpolate(high_fe, size=low_fe.size()[2:], mode="bilinear", align_corners=False)
         concat = torch.cat([low_fe, high_fe], dim=1)
         fusion_out = self.fusion_conv(concat)
         out = self.out_conv(fusion_out)
@@ -230,26 +235,30 @@ class DeeplabV3Plus(nn.Module):
 
     def forward(self, x):
         size = x.size()[2:]
-        net = self.backbone.conv1(x)
-        net = self.backbone.max_pool(net)
-        net = self.backbone.layer1(net)
-        h = net
-        net = self.backbone.layer2(net)
+        # net = self.backbone.conv1(x)
+        # net = self.backbone.max_pool(net)
+        # net = self.backbone.layer1(net)
+        # h = net
+        # net = self.backbone.layer2(net)
+        # if self.middle_layer:
+        #     h = net
+        # net = self.backbone.layer3(net)
+        # net = self.backbone.layer4(net)
+        features = self.backbone.forward_features(x)
+        h = features[0]
         if self.middle_layer:
-            h = net
-        net = self.backbone.layer3(net)
-        net = self.backbone.layer4(net)
-        aspp = self.aspp(net)
+            h = features[1]
+        aspp = self.aspp(features[-1])
         net = self.decoder_seg(h, aspp)
-        net = F.interpolate(net, size=size, mode="bilinear", align_corners=True)
+        net = F.interpolate(net, size=size, mode="bilinear", align_corners=False)
         sr = None
         fusion_sr = None
         fusion_seg = None
         if self.super_reso:
-            net = F.interpolate(net, scale_factor=self.upscale_rate, align_corners=True, mode="bilinear")
+            net = F.interpolate(net, scale_factor=self.upscale_rate, align_corners=False, mode="bilinear")
             if self.training:
                 sr_fe = self.decoder_sr(h, aspp)
-                sr_fe = F.interpolate(sr_fe, size=size, mode="bilinear", align_corners=True)
+                sr_fe = F.interpolate(sr_fe, size=size, mode="bilinear", align_corners=False)
                 sr = self.sr(sr_fe)
                 if self.sr_seg_fusion:
                     fusion = self.sr_seg_fusion_module(sr, net)
