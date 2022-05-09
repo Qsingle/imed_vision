@@ -24,11 +24,13 @@ from comm.scheduler.poly import PolyLRScheduler
 from datasets.vessel_segmentation import get_paths, SegPathDataset
 from models.segmentation import Unet, SAUnet, NestedUNet
 from models.unsupervised.unsr import UnUNetV1
+from models.segmentation import DeeplabV3Plus
 from layers.unet_blocks import *
 from models.segmentation import ConvNeXtUNet
 from models.segmentation.segformer import *
 from comm.metrics import Metric
 from loss import IBLoss
+from loss import RMILoss
 from loss import DiceLoss
 from loss import FALoss
 from loss.distance_loss import DisPenalizedCE
@@ -77,7 +79,7 @@ def main(config):
     dataset = config["dataset"]
     crop = config["crop"]
     distance = config["distance"]
-
+    drop_last = False
     if model_name == "unet":
         if block_name == "origin":
             model = Unet(in_ch=channel, out_ch=num_classes, convblock=DoubleConv,
@@ -112,6 +114,11 @@ def main(config):
         model.init_seg_decoder()
     elif model_name.lower() == "convnextunet":
         model = ConvNeXtUNet(channel, num_classes)
+    elif model_name.lower() == "deeplabv3plus":
+        model = DeeplabV3Plus(channel, num_classes, backbone=block_name, super_reso=super_reso,
+                              upscale_rate=upscale_rate, sr_seg_fusion=fusion,
+                              pretrained=config["pretrain"])
+        drop_last = True
     elif model_name.lower() == "segformer":
         pretrain = config["pretrain"]
         pretrained_model = config["pretrained"]
@@ -145,10 +152,12 @@ def main(config):
     test_dataset = SegPathDataset(test_paths, test_mask_paths, augmentation=False,
                                   output_size=image_size, super_reso=super_reso,
                                   upscale_rate=upscale_rate, divide=divide)
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, num_workers=num_workers, shuffle=True, pin_memory=True)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, num_workers=num_workers, shuffle=True, pin_memory=True,
+                              drop_last=drop_last)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, num_workers=num_workers, shuffle=False, pin_memory=True)
 
-    optimizer = opt.SGD([{"params":model.parameters(), "initial_lr":init_lr}], lr=init_lr, momentum=momentum, nesterov=True, weight_decay=weight_decay)
+    optimizer = opt.SGD([{"params":model.parameters(), "initial_lr":init_lr}], lr=init_lr,
+                        momentum=momentum, nesterov=True, weight_decay=weight_decay)
     if lr_sche == "poly":
         sche = PolyLRScheduler(optimizer, len(train_dataset), batch_size=batch_size,
                                epochs=epochs)
@@ -172,9 +181,11 @@ def main(config):
 
     if super_reso:
         sr_loss = nn.MSELoss()
-    # if fusion:
-    #     fusion_loss = FALoss()
-    seg_loss = nn.CrossEntropyLoss()
+    if fusion:
+        fusion_loss = IBLoss()
+    # seg_loss = nn.CrossEntropyLoss()
+    # rmi_loss = RMILoss(num_classes=num_classes, rmi_pool_way=1)
+    seg_loss = DiceLoss(smooth=0, gdice=True)
     if distance:
         seg_loss = DisPenalizedCE()
     # dice_loss = DiceLoss()
@@ -214,10 +225,12 @@ def main(config):
             if super_reso:
                 if sr is not None:
                     loss += sr_loss(sr, hr)
-                if fusion_sr is not None:
-                    loss += sr_loss(fusion_sr, hr)
-                if fusion_seg is not None:
-                    loss += seg_loss(fusion_seg+pred, mask)
+                # if fusion_sr is not None:
+                #     loss += sr_loss(fusion_sr, hr)
+                # if fusion_seg is not None:
+                #     loss += seg_loss(fusion_seg+pred, mask)
+                if fusion_sr is not None and fusion_seg is not None:
+                    loss += fusion_loss(fusion_sr, fusion_seg)
                 # if distance:
                 #     pass
                     # loss += dice_loss(fusion_seg, mask)
@@ -227,7 +240,10 @@ def main(config):
             optimizer.step()
             sche.step()
             losses += loss.item()
-            pred = torch.softmax(pred, dim=1)
+            if num_classes > 1:
+                pred = torch.softmax(pred, dim=1)
+            else:
+                pred = torch.sigmoid(pred)
             train_metric.update(pred, mask.to(dtype=torch.long))
             result = train_metric.evalutate()
             show_metric = ["acc", "recall", "iou"]
@@ -252,7 +268,10 @@ def main(config):
                 x = x.to(device, dtype=torch.float32)
                 mask = mask.to(device, dtype=torch.long if isinstance(seg_loss, nn.CrossEntropyLoss) else torch.float32)
                 pred = model(x)
-                pred = torch.softmax(pred, dim=1)
+                if num_classes == 1:
+                    pred = torch.sigmoid(pred)
+                else:
+                    pred = torch.softmax(pred, dim=1)
                 test_metric.update(pred, mask.to(dtype=torch.long))
             show_metric = ["acc", "recall", "iou", "recall", "precision", "specifity", "dice"]
             result = test_metric.evalutate()

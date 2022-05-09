@@ -9,7 +9,7 @@
 import torch
 import torch.nn as nn
 
-def dice_coff(output:torch.Tensor, target:torch.Tensor, smooth=0.0):
+def dice_coff(output:torch.Tensor, target:torch.Tensor, smooth=0.0, g_dice=False, eps=1e-9):
     """
     Calculate the dice coefficient
     Args:
@@ -21,23 +21,26 @@ def dice_coff(output:torch.Tensor, target:torch.Tensor, smooth=0.0):
     """
     ns = output.size()[1]
     if ns >= 2:
-        target_onehot = torch.zeros_like(output, device=output.device, dtype=torch.float32)
-        target_onehot.scatter_(1, target.unsqueeze(1), 1)
         output = torch.softmax(output, dim=1)
-        axis = [1, 2, 3]
-        inter = torch.sum(output * target_onehot, dim=axis)
-        union = torch.sum(output + target_onehot, dim=axis)
+        target_onehot = torch.zeros_like(output, device=output.device, dtype=torch.float32)
+        target_onehot.scatter_(1, target.long().unsqueeze(1), 1)
     else:
         target_onehot = target.unsqueeze(1)
         output = torch.sigmoid(output)
-        inter = target_onehot * output
-        union = target_onehot + output
-
+    target_onehot = target_onehot.flatten(2)
+    output = output.flatten(2)
+    w = 1
+    if g_dice:
+        w = torch.sum(target_onehot, dim=-1)
+        w = 1 / ((w) ** 2 + eps)
+    # axis = [1, 2, 3]
+    inter = w * torch.sum(output * target_onehot, dim=-1)
+    union = w * torch.sum(output + target_onehot, dim=-1)
     _coff = (2*inter+smooth) / (union + smooth)
     return _coff
 
 class DiceLoss(nn.Module):
-    def __init__(self, smooth=1.0):
+    def __init__(self, smooth=1.0, gdice=False, eps=1e-9):
         """
         Warp for the dice loss calculate
         Args:
@@ -45,8 +48,10 @@ class DiceLoss(nn.Module):
         """
         super(DiceLoss, self).__init__()
         self.smooth = smooth
+        self.gdice = gdice
+        self.eps = eps
 
     def forward(self, output, target):
-        coff = dice_coff(output, target, smooth=self.smooth)
-        loss = 1 - torch.mean(coff)
-        return loss
+        coff = dice_coff(output, target, smooth=self.smooth, g_dice=self.gdice, eps=self.eps)
+        loss = 1 - coff
+        return loss.mean()
