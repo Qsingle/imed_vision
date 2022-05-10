@@ -22,6 +22,8 @@ from models.segmentation.pfseg import PFSeg
 from layers.unet_blocks import *
 from comm.helper import to_tuple
 from comm.metrics import Metric
+from models.segmentation.segformer import *
+from models.segmentation import DeeplabV3Plus
 
 
 def main(config):
@@ -43,7 +45,7 @@ def main(config):
     os.environ["CUDA_VISIBLE_DEVICES"] = gpu_index
     dataset = config["dataset"]
     output_dir = config["output_dir"]
-
+    image_size = to_tuple(image_size, 2)
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
@@ -74,6 +76,11 @@ def main(config):
         model = SAUnet(in_ch=channel, num_classes=num_classes)
     elif model_name == "pfseg":
         model = PFSeg(channel, num_classes=num_classes)
+    elif model_name == "segformer":
+        model = segformer_b0(img_size=image_size[0], num_classes=num_classes)
+    elif model_name.lower() == "deeplabv3plus":
+        model = DeeplabV3Plus(channel, num_classes, backbone=block_name, super_reso=super_reso,
+                              upscale_rate=upscale_rate, sr_seg_fusion=fusion, output_stride=8)
     else:
         raise ValueError("Unknown model name {}".format(model_name))
 
@@ -81,7 +88,7 @@ def main(config):
     print("Find {} pairs".format(len(image_paths)))
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.eval()
-    image_size = to_tuple(image_size, 2)
+
     assert os.path.exists(weights), "Please sure the weights file {} is exists".format(weights)
     state = torch.load(weights, map_location="cpu")
     model_state = state["model"]
@@ -128,19 +135,21 @@ def main(config):
                 pred = model(x)
             if num_classes == 1:
                 pred = torch.sigmoid(pred)
+                pred = torch.where(pred >= 0.5, 1, 0)
             else:
                 pred = torch.softmax(pred, dim=1)
-            pred = torch.max(pred, dim=1)[1]
+                pred = torch.max(pred, dim=1)[1]
             if out_w != w or out_h != h:
                 # pred = F.interpolate(pred, size=(h,w), mode="nearest")
                 pred = cv2.resize(pred.cpu().squeeze().numpy(), (w, h), interpolation=cv2.INTER_NEAREST)
                 pred = torch.from_numpy(pred).to(device, dtype=torch.long)
             metric.update(pred, mask.unsqueeze(0))
-            cv2.imwrite(os.path.join(output_dir, filename), pred.cpu().numpy()*255)
+            cv2.imwrite(os.path.join(output_dir, filename), pred.squeeze().cpu().numpy()*255)
 
     result = metric.evalutate()
     show_metric = ["precision", "acc", "dice", "specifity", "iou", "recall", "mcc", "bm"]
     result_text = ""
+    torch.save(result, os.path.join(output_dir, "results.pkl"))
     for met in show_metric:
         if num_classes <=2:
             result_text += "{}:{} ".format(met, result[met][1].item())
