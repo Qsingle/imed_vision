@@ -199,8 +199,7 @@ class BGA(nn.Module):
         #segmentic branch
         self.sup = nn.Sequential(
             nn.Conv2d(sch, dch, 3, 1, 1),
-            nn.BatchNorm2d(dch),
-            nn.ConvTranspose2d(dch, dch, 4, 4)
+            nn.BatchNorm2d(dch)
         )
         self.spath = nn.Sequential(
             DepthWiseConv2d(sch, sch, 3, 1, 1),
@@ -225,7 +224,7 @@ class BGA(nn.Module):
         dpath = self.dpath(dfe)
         ddown = self.ddown(dfe)
 
-        sup = torch.sigmoid(self.sup(sfe))
+        sup = torch.sigmoid(F.interpolate(self.sup(sfe), size=dfe.size()[2:], mode="bilinear", align_corners=False))
         spath = torch.sigmoid(self.spath(sfe))
 
         daggre = sup * dpath

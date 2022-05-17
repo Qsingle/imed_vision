@@ -19,7 +19,8 @@ from layers.bisnetv2_layers import *
 
 
 class BiseNetV2(nn.Module):
-    def __init__(self, in_ch=3, num_classes=19, expansion=6, alpha=1, d=1, lambd=4, dchs=[64, 64, 128], boost=True):
+    def __init__(self, in_ch=3, num_classes=19, expansion=6, alpha=1, d=1, lambd=4, dchs=[64, 64, 128], boost=True,
+                 control=64):
         super(BiseNetV2, self).__init__()
         self.detail = DetailHead(in_ch, chs=dchs)
         ch = (dchs[0] // lambd) * alpha
@@ -44,13 +45,13 @@ class BiseNetV2(nn.Module):
         self.semantic_s5 = nn.Sequential(*s5_blocks)
         self.ce = CE(ch)
         self.aggre = BGA(dchs[2], 128)
-        self.out = BiseNetV2Head(128, 64, num_classes)
+        self.out = BiseNetV2Head(128, control, num_classes)
         self.boost = boost
         if boost:
-            self.s1_head = BiseNetV2Head((dchs[0] // lambd) * alpha, 64, num_classes)
-            self.s3_head = BiseNetV2Head(int(dchs[2] // lambd * alpha), 64, num_classes)
-            self.s4_head = BiseNetV2Head(int(64*alpha), 64, num_classes)
-            self.s5_head = BiseNetV2Head(ch, 64, num_classes)
+            self.s1_head = BiseNetV2Head((dchs[0] // lambd) * alpha, control, num_classes)
+            self.s3_head = BiseNetV2Head(int(dchs[2] // lambd * alpha), control, num_classes)
+            self.s4_head = BiseNetV2Head(int(64*alpha), control, num_classes)
+            self.s5_head = BiseNetV2Head(ch, control, num_classes)
 
     def forward(self, x):
         detail = self.detail(x)
@@ -79,7 +80,7 @@ if __name__ == "__main__":
     import torch
     import sys
     sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    x = torch.randn(1, 3, 256, 256)
+    x = torch.randn(1, 3, 400, 400)
     model = bisenetv2(num_classes=2)
     model.eval()
     out = model(x)
