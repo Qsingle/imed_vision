@@ -14,3 +14,5 @@ from .deeplab import *
 from .pfseg import PFSeg
 from .convnextunet import ConvNeXtUNet
 from .segformer import *
+from .bisenetv2 import bisenetv2_l, bisenetv2, BiseNetV2
+from .stdcnet_seg import *

@@ -23,9 +23,11 @@ def dice_coff(output:torch.Tensor, target:torch.Tensor, smooth=0.0, g_dice=False
     if ns >= 2:
         output = torch.softmax(output, dim=1)
         target_onehot = torch.zeros_like(output, device=output.device, dtype=torch.float32)
-        target_onehot.scatter_(1, target.long().unsqueeze(1), 1)
+        with torch.no_grad():
+            target_onehot.scatter_(1, target.long().unsqueeze(1), 1)
     else:
-        target_onehot = target.unsqueeze(1)
+        with torch.no_grad():
+            target_onehot = target.unsqueeze(1)
         output = torch.sigmoid(output)
     target_onehot = target_onehot.flatten(2)
     output = output.flatten(2)

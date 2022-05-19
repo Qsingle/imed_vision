@@ -11,17 +11,18 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from models.classification.mixformer import *
+from models.classification.create_model import create_backbone
 
 __all__ = ["segformer_b0", "segformer_b1", "segformer_b2", "segformer_b3", "segformer_b4", "segformer_b5", "SegFormer"]
 
-backbones = {
-    "mit_b0":mit_b0,
-    "mit_b1":mit_b1,
-    "mit_b2":mit_b2,
-    "mit_b3":mit_b3,
-    "mit_b4":mit_b4,
-    "mit_b5":mit_b5
-}
+# backbones = {
+#     "mit_b0":mit_b0,
+#     "mit_b1":mit_b1,
+#     "mit_b2":mit_b2,
+#     "mit_b3":mit_b3,
+#     "mit_b4":mit_b4,
+#     "mit_b5":mit_b5
+# }
 
 class MLP(nn.Module):
     def __init__(self, dim, hidden_dim=256):
@@ -63,7 +64,10 @@ class SegFormer(nn.Module):
     def __init__(self, img_size=512, arch="mit_b0", num_classes=19, dims=[32, 64, 160, 256], embd_dim=256, pretrained=False,
                  pretrained_weights=None, drop_rate=0.1, **kwargs):
         super(SegFormer, self).__init__()
-        self.encoder = backbones[arch](img_size=img_size, **kwargs)
+        assert arch in ["mit_b0", "mit_b1", "mit_b2", "mit_b3", "mit_b4", "mit_b5"], "backbone arch must in " \
+                                                                                     "['mit_b0', 'mit_b1', 'mit_b2', " \
+                                                                                     "'mit_b3', 'mit_b4', 'mit_b5']"
+        self.encoder = create_backbone(arch, img_size=img_size, **kwargs)
         if pretrained:
             assert pretrained_weights is not None
             state = torch.load(pretrained_weights, map_location="cpu")
@@ -79,6 +83,7 @@ class SegFormer(nn.Module):
         out = self.out_conv(decoder_feature)
         out = F.interpolate(out, size=x.shape[2:], mode="bilinear", align_corners=False)
         return out
+
 
 def segformer_b0(**kwargs):
     return SegFormer(dims=[32, 64, 160, 256], arch="mit_b0", embd_dim=256, drop_rate=0.1, **kwargs)

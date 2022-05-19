@@ -115,7 +115,7 @@ def log_det_by_cholesky(matrix):
     """
     # This uses the property that the log det(A) = 2 * sum(log(real(diag(C))))
     # where C is the cholesky decomposition of A.
-    chol = torch.cholesky(matrix)
+    chol = torch.linalg.cholesky(matrix)
     # return 2.0 * torch.sum(torch.log(torch.diagonal(chol, dim1=-2, dim2=-1) + 1e-6), dim=-1)
     return 2.0 * torch.sum(torch.log(torch.diagonal(chol, dim1=-2, dim2=-1) + 1e-8), dim=-1)
 
@@ -125,7 +125,7 @@ def batch_cholesky_inverse(matrix):
     Args:
         matrix, 4-D tensor, [N, C, M, M]. matrix must be a symmetric positive define matrix.
     """
-    chol_low = torch.cholesky(matrix, upper=False)
+    chol_low = torch.linalg.cholesky(matrix, upper=False)
     chol_low_inv = batch_low_tri_inv(chol_low)
     return torch.matmul(chol_low_inv.transpose(-2, -1), chol_low_inv)
 

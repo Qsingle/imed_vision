@@ -127,9 +127,15 @@ class Unet(nn.Module):
                 nn.PixelShuffle(upscale_factor=upscale_rate)
             )
             self.sr_seg_fusion = sr_seg_fusion
+            self.upsample_way = kwargs.get("upsample_way", 1)
+            if self.upsample_way == 2:
+                self.out_up = nn.Sequential(
+                    nn.Conv2d(out_ch, out_ch*(upscale_rate**2), kernel_size=3, stride=1, padding=1, bias=False),
+                    nn.PixelShuffle(upscale_factor=upscale_rate)
+                )
             if sr_seg_fusion:
-                # self.sr_seg_fusion_module = SpatialFusion(in_ch, out_ch)
-                self.sr_seg_fusion_module = LinearFusion(64, 64)
+                self.sr_seg_fusion_module = SpatialFusion(in_ch, out_ch)
+                # self.sr_seg_fusion_module = LinearFusion(in_ch, out_ch)
                 # self.fusion_mlp = nn.Sequential(
                 #     nn.Conv2d(out_ch, 32, 1, 1),
                 #     nn.ReLU(),
@@ -151,8 +157,14 @@ class Unet(nn.Module):
             out = F.interpolate(out, size=x.size()[2:], mode="bilinear", align_corners=True)
         else:
             h, w = x.size()[2:]
-            out = F.interpolate(out, size=(h * self.upscale_rate, w * self.upscale_rate), mode="bilinear",
+            if self.upsample_way == 1:
+                out = F.interpolate(out, size=(h * self.upscale_rate, w * self.upscale_rate), mode="bilinear",
                                 align_corners=True)
+            elif self.upsample_way == 2:
+                out = F.interpolate(out, size=x.size()[2:], mode="bilinear", align_corners=True)
+                out = self.out_conv(out)
+
+
         fusion_seg = None
         sr = None
         fusion_sr = None
@@ -172,9 +184,9 @@ class Unet(nn.Module):
 
             sr = self.sr_module(sr_up9)
             if self.sr_seg_fusion:
-                # fusion = self.sr_seg_fusion_module(sr, out)
-                # fusion_seg = fusion*out + out
-                fusion_sr, fusion_seg = self.sr_seg_fusion_module(sr_up9, up9)
+                fusion = self.sr_seg_fusion_module(sr, out)
+                fusion_seg = fusion*out + out
+                # fusion_sr, fusion_seg = self.sr_seg_fusion_module(sr, out)
                 # fusion_sr = fusion*sr
 
         # out = torch.max(out, dim=1)[1]

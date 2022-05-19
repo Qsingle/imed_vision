@@ -11,23 +11,24 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from models.classification.resnet import *
-from layers.spatial_fusion import SpatialFusion
+# from models.classification.resnet import *
+from models.classification import create_backbone
 from layers.utils import *
+from layers.spatial_fusion import SpatialFusion
 
 __all__ = ["DeeplabV3", "DeeplabV3Plus", "ASPP", "ImagePooling"]
 
-backbones = {
-    "resnet50":resnet50,
-    "resnet101":resnet101,
-    "resnest50" : resnest50,
-    "resnest101" : resnest101,
-    "resnest200" : resnest200,
-    "resnest269" : resnest269,
-    "seresnet50" : seresnet50,
-    "resnest26" : resnest26,
-    "resnest14" : resnest14
-}
+# backbones = {
+#     "resnet50":resnet50,
+#     "resnet101":resnet101,
+#     "resnest50" : resnest50,
+#     "resnest101" : resnest101,
+#     "resnest200" : resnest200,
+#     "resnest269" : resnest269,
+#     "seresnet50" : seresnet50,
+#     "resnest26" : resnest26,
+#     "resnest14" : resnest14
+# }
 
 
 class ImagePooling(nn.Module):
@@ -105,8 +106,10 @@ class DeeplabV3(nn.Module):
             raise ValueError("Unknown output stride, except 16 or 8 but got {}".format(output_stride))
 
         multi_grids = [1, 2, 4]
-        self.backbone = backbones[backbone](in_ch=in_ch, strides=strides,
-                                            dilations=dilations, multi_grids=multi_grids, **kwargs)
+        # self.backbone = backbones[backbone](in_ch=in_ch, strides=strides,
+        #                                     dilations=dilations, multi_grids=multi_grids, **kwargs)
+        self.backbone = create_backbone(backbone)(in_ch=in_ch, strides=strides,
+                                                  dilations=dilations, multi_grids=multi_grids, **kwargs)
         del self.backbone.avg_pool
         del self.backbone.fc
         self.aspp = ASPP(in_planes=2048, out_ch=256, rates=rates)
@@ -192,7 +195,9 @@ class DeeplabV3Plus(nn.Module):
             raise ValueError("Unknown output stride, except 16 or 8 but got {}".format(output_stride))
 
         multi_grids = [1, 2, 4]
-        self.backbone = backbones[backbone](in_ch=in_ch, strides=strides,
+        # self.backbone = backbones[backbone](in_ch=in_ch, strides=strides,
+        #                                     dilations=dilations, multi_grids=multi_grids, **kwargs)
+        self.backbone = create_backbone(backbone, in_ch=in_ch, strides=strides,
                                             dilations=dilations, multi_grids=multi_grids, **kwargs)
         try:
             norm_layer = kwargs["norm_layer"]

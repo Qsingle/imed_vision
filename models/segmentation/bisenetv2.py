@@ -21,6 +21,21 @@ from layers.bisnetv2_layers import *
 class BiseNetV2(nn.Module):
     def __init__(self, in_ch=3, num_classes=19, expansion=6, alpha=1, d=1, lambd=4, dchs=[64, 64, 128], boost=True,
                  control=64):
+        """
+        Implementation of BiseNetV2
+         "BiSeNet V2: Bilateral Network with Guided Aggregation for Real-time Semantic Segmentation"
+            <https://arxiv.org/pdf/2004.02147.pdf>
+        Args:
+            in_ch (int): number of channels for input
+            num_classes (int): number of classes
+            expansion (int): expansion rate for the GE block
+            alpha (int): channel expansion rate
+            d (int): depth control
+            lambd (int): lambda to control the number of channels for semantic branch
+            dchs (list): channels for detail head
+            boost (bool): whether use boost prediction
+            control (int): number of channels for hidden state in segmentation head
+        """
         super(BiseNetV2, self).__init__()
         dchs = [ch * alpha for ch in dchs]
         self.detail = DetailHead(in_ch, chs=dchs)

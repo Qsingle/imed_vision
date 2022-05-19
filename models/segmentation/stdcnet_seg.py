@@ -14,6 +14,8 @@ from models.classification import create_backbone
 from layers.bisenetv1_layers import ARM, FFM
 from layers.stdc import ConvBNReLU
 
+__all__ = ["STDCNetSeg", "stdcnet_1_seg", "stdcnet_2_seg"]
+
 class SegHead(nn.Module):
     def __init__(self, in_ch, hidden_ch, out_ch):
         super(SegHead, self).__init__()
@@ -26,7 +28,7 @@ class SegHead(nn.Module):
         return self.conv(x)
 
 class STDCNetSeg(nn.Module):
-    def __init__(self, in_ch, num_classes=19, backbone="stdcnet_1", pretrained=False, checkpoint=None,
+    def __init__(self, in_ch=3, num_classes=19, backbone="stdcnet_1", pretrained=False, checkpoint=None,
                  boost=False, use_conv_last=False):
         """
         Implementation of STDCNet for segmentation.
@@ -94,8 +96,13 @@ class STDCNetSeg(nn.Module):
             else:
                 return seg_out
 
+def stdcnet_1_seg(pretrained=False, checkpoint=None, **kwargs):
+    kwargs["backbone"] = "stdcnet_1"
+    return STDCNetSeg(pretrained=pretrained, checkpoint=checkpoint, **kwargs)
 
-
+def stdcnet_2_seg(pretrained=False, checkpoint=None, **kwargs):
+    kwargs["backbone"] = "stdcnet_2"
+    return STDCNetSeg(pretrained=pretrained, checkpoint=checkpoint, **kwargs)
 
 if __name__ == "__main__":
     import torch

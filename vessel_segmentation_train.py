@@ -22,17 +22,19 @@ import tqdm
 
 from comm.scheduler.poly import PolyLRScheduler
 from datasets.vessel_segmentation import get_paths, SegPathDataset
+from datasets.crossmoda import CrossMoDA
 from models.segmentation import Unet, SAUnet, NestedUNet
 from models.unsupervised.unsr import UnUNetV1
 from models.segmentation import DeeplabV3Plus
 from layers.unet_blocks import *
 from models.segmentation import ConvNeXtUNet
 from models.segmentation.segformer import *
+from models.segmentation import bisenetv2, bisenetv2_l, BiseNetV2
+from models.segmentation import STDCNetSeg
 from comm.metrics import Metric
-from loss import IBLoss
 from loss import RMILoss
-from loss import DiceLoss
-from loss import FALoss
+from loss import SSIMLoss
+from loss import DetailLoss
 from loss.distance_loss import DisPenalizedCE
 
 def get_ddr_paths(
@@ -116,9 +118,19 @@ def main(config):
         model = ConvNeXtUNet(channel, num_classes)
     elif model_name.lower() == "deeplabv3plus":
         model = DeeplabV3Plus(channel, num_classes, backbone=block_name, super_reso=super_reso,
-                              upscale_rate=upscale_rate, sr_seg_fusion=fusion,
+                              upscale_rate=upscale_rate, sr_seg_fusion=fusion, output_stride=8,
                               pretrained=config["pretrain"])
         drop_last = True
+    elif model_name.lower() == "bisenetv2":
+        model = bisenetv2(in_ch=channel, num_classes=num_classes)
+    elif model_name.lower() == "bisenetv2_l":
+        model = bisenetv2_l(in_ch=channel, num_classes=num_classes)
+    elif model_name.lower() == "stdcnet":
+        pretrain = config["pretrain"]
+        pretrained_model = config["pretrained"]
+        model = STDCNetSeg(in_ch=channel, num_classes=num_classes,
+                           backbone=block_name, pretrained=pretrain,
+                           checkpoint=pretrained_model, boost=True)
     elif model_name.lower() == "segformer":
         pretrain = config["pretrain"]
         pretrained_model = config["pretrained"]
@@ -142,6 +154,23 @@ def main(config):
                                                       image_suffix=image_suffix, mask_suffix=mask_suffix)
         test_paths, test_mask_paths = get_ddr_paths(image_dir, "valid", ltype=config["ltype"],
                                                     image_suffix=image_suffix, mask_suffix=mask_suffix)
+    elif dataset == "crossmoda":
+        image_dirs = glob.glob(os.path.join(image_dir, "*"))
+        train_dirs, val_dirs = train_test_split(image_dirs, test_size=0.3)
+        train_paths = []
+        train_mask_paths = []
+        for dirname in train_dirs:
+            local_paths = glob.glob(os.path.join(dirname, "*.npy"))
+            train_paths += local_paths
+            train_mask_paths += [os.path.join(dirname, "mask", os.path.splitext(os.path.basename(p))[0]+".png") for p
+                                 in local_paths]
+        test_paths = []
+        test_mask_paths = []
+        for dirname in val_dirs:
+            local_paths = glob.glob(os.path.join(dirname, "*.npy"))
+            test_paths += local_paths
+            test_mask_paths += [os.path.join(dirname, "mask", os.path.splitext(os.path.basename(p))[0] + ".png") for p
+                                 in local_paths]
     else:
         image_paths, mask_paths = get_paths(image_dir, mask_dir, image_suffix, mask_suffix)
         train_paths, test_paths, train_mask_paths, test_mask_paths = train_test_split(image_paths, mask_paths,
@@ -152,10 +181,16 @@ def main(config):
     test_dataset = SegPathDataset(test_paths, test_mask_paths, augmentation=False,
                                   output_size=image_size, super_reso=super_reso,
                                   upscale_rate=upscale_rate, divide=divide)
+    if dataset == "crossmoda":
+        train_dataset = CrossMoDA(train_paths, train_mask_paths, augmentation=True, output_size=image_size,
+                                  upscale_rate=upscale_rate, super_reso=super_reso)
+        test_dataset = CrossMoDA(test_paths, test_mask_paths, augmentation=False,
+                                  output_size=image_size, super_reso=super_reso,
+                                  upscale_rate=upscale_rate)
     train_loader = DataLoader(train_dataset, batch_size=batch_size, num_workers=num_workers, shuffle=True, pin_memory=True,
                               drop_last=drop_last)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, num_workers=num_workers, shuffle=False, pin_memory=True)
-
+    #optimizer
     optimizer = opt.SGD([{"params":model.parameters(), "initial_lr":init_lr}], lr=init_lr,
                         momentum=momentum, nesterov=True, weight_decay=weight_decay)
     if lr_sche == "poly":
@@ -181,11 +216,16 @@ def main(config):
 
     if super_reso:
         sr_loss = nn.MSELoss()
-    if fusion:
-        fusion_loss = IBLoss()
-    # seg_loss = nn.CrossEntropyLoss()
+        ssim_loss = SSIMLoss(data_range=1)
+    # if fusion:
+    rmi_loss = RMILoss(num_classes=num_classes, rmi_pool_way=1)
+    seg_loss = nn.CrossEntropyLoss()
     # rmi_loss = RMILoss(num_classes=num_classes, rmi_pool_way=1)
-    seg_loss = DiceLoss(smooth=0, gdice=True)
+    # seg_loss = DiceLoss(smooth=0, gdice=False)
+    if isinstance(model, STDCNetSeg):
+        detail_loss = DetailLoss()
+        optimizer.add_param_group({"params" : detail_loss.parameters(), "initial_lr":init_lr })
+        detail_loss.to(device)
     if distance:
         seg_loss = DisPenalizedCE()
     # dice_loss = DiceLoss()
@@ -203,7 +243,7 @@ def main(config):
         for data in bar:
             if super_reso:
                 x, hr, mask = data
-                hr = hr.to(device)
+                hr = hr.to(device, dtype=torch.float32)
             else:
                 x, mask = data
             x = x.to(device, dtype=torch.float32)
@@ -216,21 +256,37 @@ def main(config):
             fusion_sr = None
             sr = None
             if isinstance(pred, tuple):
-                if len(pred) == 2:
-                    pred, sr = pred
-                elif len(pred) == 4:
-                    pred, sr, fusion_seg, fusion_sr = pred
+                if isinstance(model, STDCNetSeg):
+                    pred, detail, out_s4, out_s5 = pred
+                elif isinstance(model, BiseNetV2):
+                    pred, out_s1, out_s3, out_s4, out_s5 = pred
+                else:
+                    if len(pred) == 2:
+                        pred, sr = pred
+                    elif len(pred) == 4:
+                        pred, sr, fusion_seg, fusion_sr = pred
             # print(pred.shape)
             loss = seg_loss(pred, mask)
+            if isinstance(model, STDCNetSeg):
+                loss += detail_loss(detail, mask.float())
+                loss += seg_loss(out_s4, mask)
+                loss += seg_loss(out_s5, mask)
+            elif isinstance(model, BiseNetV2):
+                loss += seg_loss(out_s1, mask)
+                loss += seg_loss(out_s3, mask)
+                loss += seg_loss(out_s4, mask)
+                loss += seg_loss(out_s5, mask)
             if super_reso:
                 if sr is not None:
-                    loss += sr_loss(sr, hr)
-                # if fusion_sr is not None:
-                #     loss += sr_loss(fusion_sr, hr)
-                # if fusion_seg is not None:
-                #     loss += seg_loss(fusion_seg+pred, mask)
-                if fusion_sr is not None and fusion_seg is not None:
-                    loss += fusion_loss(fusion_sr, fusion_seg)
+                    # loss += (1-0.85)*sr_loss(sr, hr)
+                    loss += (1-0.85)*sr_loss(sr, hr)
+                    # loss += 0.85*ssim_loss(sr, hr)
+                if fusion_sr is not None:
+                    loss += 0.85*ssim_loss(fusion_sr, hr)
+                if fusion_seg is not None:
+                    # loss += rmi_loss(fusion_seg, mask)
+                    loss += seg_loss(fusion_seg, mask)
+                    loss += rmi_loss(fusion_seg, mask)
                 # if distance:
                 #     pass
                     # loss += dice_loss(fusion_seg, mask)
@@ -268,6 +324,8 @@ def main(config):
                 x = x.to(device, dtype=torch.float32)
                 mask = mask.to(device, dtype=torch.long if isinstance(seg_loss, nn.CrossEntropyLoss) else torch.float32)
                 pred = model(x)
+                if isinstance(model, STDCNetSeg):
+                    pred = pred[0]
                 if num_classes == 1:
                     pred = torch.sigmoid(pred)
                 else:

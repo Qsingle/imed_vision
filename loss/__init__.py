@@ -11,3 +11,5 @@ from .dice import DiceLoss
 from .fa_loss import FALoss
 from .tfm import TFM
 from .ibloss import IBLoss
+from .rmi import RMILoss
+from .detail_loss import DetailLoss
