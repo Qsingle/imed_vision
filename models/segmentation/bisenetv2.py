@@ -22,12 +22,13 @@ class BiseNetV2(nn.Module):
     def __init__(self, in_ch=3, num_classes=19, expansion=6, alpha=1, d=1, lambd=4, dchs=[64, 64, 128], boost=True,
                  control=64):
         super(BiseNetV2, self).__init__()
+        dchs = [ch * alpha for ch in dchs]
         self.detail = DetailHead(in_ch, chs=dchs)
-        ch = (dchs[0] // lambd) * alpha
+        ch = dchs[0] // lambd
         self.semantic_s1 = StemBlock(in_ch, out_ch=ch)
         depth_s3 = int(2*d)
-        s3_blocks = [GE(ch, int(dchs[2] // lambd * alpha), stride=2, expansion=expansion)]
-        ch = int(dchs[2] // lambd * alpha)
+        s3_blocks = [GE(ch, int(dchs[2] // lambd), stride=2, expansion=expansion)]
+        ch = dchs[2] // lambd
         for i in range(1, depth_s3):
             s3_blocks.append(GE(ch, ch, expansion=expansion))
         self.semantic_s3 = nn.Sequential(*s3_blocks)
@@ -38,18 +39,18 @@ class BiseNetV2(nn.Module):
             s4_blocks.append(GE(ch, ch, expansion=expansion))
         self.semantic_s4 = nn.Sequential(*s4_blocks)
         s5_depth = int(4*d)
-        s5_blocks = [GE(ch, int(128*alpha), stride=2, expansion=expansion)]
-        ch = int(128*alpha)
+        s5_blocks = [GE(ch, dchs[2], stride=2, expansion=expansion)]
+        ch = dchs[2]
         for i in range(1, s5_depth):
             s5_blocks.append(GE(ch, ch, expansion=expansion))
         self.semantic_s5 = nn.Sequential(*s5_blocks)
         self.ce = CE(ch)
-        self.aggre = BGA(dchs[2], 128)
-        self.out = BiseNetV2Head(128, control, num_classes)
+        self.aggre = BGA(dchs[2], ch)
+        self.out = BiseNetV2Head(dchs[2], control, num_classes)
         self.boost = boost
         if boost:
-            self.s1_head = BiseNetV2Head((dchs[0] // lambd) * alpha, control, num_classes)
-            self.s3_head = BiseNetV2Head(int(dchs[2] // lambd * alpha), control, num_classes)
+            self.s1_head = BiseNetV2Head((dchs[0] // lambd), control, num_classes)
+            self.s3_head = BiseNetV2Head(int(dchs[2] // lambd), control, num_classes)
             self.s4_head = BiseNetV2Head(int(64*alpha), control, num_classes)
             self.s5_head = BiseNetV2Head(ch, control, num_classes)
 
@@ -80,8 +81,8 @@ if __name__ == "__main__":
     import torch
     import sys
     sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    x = torch.randn(1, 3, 400, 400)
-    model = bisenetv2(num_classes=2)
+    x = torch.randn(1, 3, 300, 300)
+    model = bisenetv2_l(num_classes=2)
     model.eval()
     out = model(x)
     print(out.shape)

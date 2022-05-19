@@ -151,7 +151,7 @@ class GE(nn.Module):
         return net
 
 class CE(nn.Module):
-    def __init__(self, in_ch, out_ch=128):
+    def __init__(self, in_ch):
         """
         Implementation of the Context Embedding Block in BiseNetV2.
         "BiSeNet V2: Bilateral Network with Guided Aggregation for Real-time Semantic Segmentation"
@@ -163,7 +163,7 @@ class CE(nn.Module):
         super(CE, self).__init__()
         self.gpool = nn.AdaptiveAvgPool2d(1)
         self.conv = Conv2d(in_ch, in_ch, 1, 1)
-        self.gather = nn.Conv2d(in_ch, out_ch, 3, 1, 1)
+        self.gather = nn.Conv2d(in_ch, in_ch, 3, 1, 1)
 
     def forward(self, x):
         net = self.gpool(x)
