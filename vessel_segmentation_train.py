@@ -11,7 +11,6 @@ import glob
 import torch
 import torch.nn as nn
 import torch.optim as opt
-import torch.optim.lr_scheduler as scheduler
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from sklearn.model_selection import train_test_split
@@ -31,6 +30,7 @@ from models.segmentation import ConvNeXtUNet
 from models.segmentation.segformer import *
 from models.segmentation import bisenetv2, bisenetv2_l, BiseNetV2
 from models.segmentation import STDCNetSeg
+from models.segmentation.scsnet import SCSNet
 from comm.metrics import Metric
 from loss import RMILoss
 from loss import SSIMLoss
@@ -125,6 +125,8 @@ def main(config):
         model = bisenetv2(in_ch=channel, num_classes=num_classes)
     elif model_name.lower() == "bisenetv2_l":
         model = bisenetv2_l(in_ch=channel, num_classes=num_classes)
+    elif model_name.lower() == "scsnet":
+        model = SCSNet(in_ch=channel, num_classes=num_classes)
     elif model_name.lower() == "stdcnet":
         pretrain = config["pretrain"]
         pretrained_model = config["pretrained"]
@@ -134,7 +136,7 @@ def main(config):
     elif model_name.lower() == "segformer":
         pretrain = config["pretrain"]
         pretrained_model = config["pretrained"]
-        model = segformer_b0(img_size=image_size[0], num_classes=num_classes,
+        model = segformer_b5(img_size=image_size[0], num_classes=num_classes,
                              pretrain=pretrain, pretrained_model=pretrained_model)
     else:
         raise ValueError("Unknown model name {}".format(model_name))
@@ -266,7 +268,14 @@ def main(config):
                     elif len(pred) == 4:
                         pred, sr, fusion_seg, fusion_sr = pred
             # print(pred.shape)
-            loss = seg_loss(pred, mask)
+
+            if isinstance(model, NestedUNet):
+                loss = seg_loss(pred[0], mask)
+                for i in range(1, 4):
+                    loss += seg_loss(pred[i], mask)
+                pred = pred[-1]
+            else:
+                loss = seg_loss(pred, mask)
             if isinstance(model, STDCNetSeg):
                 loss += detail_loss(detail, mask.float())
                 loss += seg_loss(out_s4, mask)
@@ -326,6 +335,8 @@ def main(config):
                 pred = model(x)
                 if isinstance(model, STDCNetSeg):
                     pred = pred[0]
+                elif isinstance(model, NestedUNet):
+                    pred = pred[-1]
                 if num_classes == 1:
                     pred = torch.sigmoid(pred)
                 else:

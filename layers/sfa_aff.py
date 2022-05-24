@@ -12,6 +12,7 @@ from __future__ import division
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 
 class SFA(nn.Module):
@@ -69,7 +70,7 @@ class SFA(nn.Module):
         return out
 
 class AFF(nn.Module):
-    def __init__(self, in_ch1, in_ch2, reduction=16):
+    def __init__(self, in_ch, reduction=16):
         """
             Implementation of Adaptive feature fusion module
             References:
@@ -77,41 +78,37 @@ class AFF(nn.Module):
                 <https://www.sciencedirect.com/science/article/pii/S1361841521000712>
             Parameters
             ----------
-            in_ch1 (int): number of channels of low-level feature
-            in_ch2 (int): number of channels of high-level feature
+            in_ch (int): number of channels of input
             reduction (int): reduction rate for squeeze
         """
         super(AFF, self).__init__()
-        hidden_ch = in_ch1 + in_ch2
-        self.mlp = nn.Sequential(
-            nn.AdaptiveAvgPool2d(1),
-            nn.Conv2d(hidden_ch, hidden_ch // reduction, 1, 1),
+        in_ch1 = in_ch*2
+        hidden_ch = (in_ch*2) // reduction
+        self.se = nn.Sequential(
+            nn.Conv2d(in_ch1, hidden_ch, 1),
             nn.ReLU(),
-            nn.Conv2d(hidden_ch // reduction, hidden_ch, 1, 1),
+            nn.Conv2d(hidden_ch, in_ch1, 1),
             nn.Sigmoid()
         )
-        self.conv1 = nn.Conv2d(hidden_ch, in_ch1)
-        self.gap = nn.AdaptiveAvgPool2d(1)
+        self.conv1x1 = nn.Conv2d(in_ch1, in_ch, 1)
 
-    def forward(self, low_fea, high_fea):
+    def forward(self, x1, x2):
         """
 
         Parameters
         ----------
-        low_fea (Tensor): low level feature, (n,c,h,w)
-        high_fea (Tensor): high level feature, (n,c,h,w)
+        x1 (Tensor): low level feature, (n,c,h,w)
+        x2 (Tensor): high level feature, (n,c,h,w)
 
         Returns
         -------
             Tensor, fused feature
         """
-        ch = low_fea.size()[1]
-        fusion = torch.cat([high_fea, low_fea], dim=1)
-        sq_ex = self.mlp(fusion)
-        sq_ex = sq_ex * fusion
-        sq_ex = self.conv1(sq_ex)
-        gap = self.gap(sq_ex)
-        att = torch.sigmoid(gap)
-        low_fea = low_fea*weight
-        out = low_fea + high_fea
+        x12 = torch.cat([x1, x2], dim=1)
+        se = self.se(x12)
+        se = self.conv1x1(se)
+        se = F.adaptive_avg_pool2d(se, 1)
+        se = torch.sigmoid(se)
+        w1 = se * x1
+        out = w1 + x2
         return out
