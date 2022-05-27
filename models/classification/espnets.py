@@ -13,6 +13,8 @@ import torch.nn.functional as F
 
 from layers import Conv2d, EESP, SESSP
 
+from .create_model import BACKBONE_REGISTER
+
 __all__ = ["EspNetV2", "espnetv2_s_0_5", "espnetv2_s_1_0",
            "espnetv2_s_1_25", "espnetv2_s_1_5", "espnetv2_s_2_0"]
 
@@ -107,35 +109,41 @@ class EspNetV2(nn.Module):
                 nn.init.normal_(m.weight, std=0.001)
                 if m.bias is not None:
                     nn.init.zeros_(m.bias)
-
-    def forward(self, inputs):
+    def forward_features(self, inputs):
+        features = []
         out_l1 = self.level1(inputs)
+        features.append(out_l1)
         if not self.reinf:
             del inputs
             inputs = None
         out_l2 = self.level2_0(out_l1, inputs)
-
+        features.append(out_l2)
         out_l3_0 = self.level3_0(out_l2, inputs)
         for i, layer in enumerate(self.level3):
             if i == 0:
                 out_l3 = layer(out_l3_0)
             else:
                 out_l3 = layer(out_l3)
-
+        features.append(out_l3)
         outl4_0 = self.level4_0(out_l3, inputs)
         for i, layer in enumerate(self.level4):
             if i == 0:
                 out_l4 = layer(outl4_0)
             else:
                 out_l4 = layer(out_l4)
-
+        features.append(out_l4)
         outl5_0 = self.level5_0(out_l4, inputs)
         for i, layer in enumerate(self.level5):
             if i == 0:
                 out_l5 = layer(outl5_0)
             else:
                 out_l5 = layer(out_l5)
-        net = F.adaptive_avg_pool2d(out_l5, 1)
+        features.append(out_l5)
+        return features
+
+    def forward(self, inputs):
+        features = self.forward_features(inputs)
+        net = F.adaptive_avg_pool2d(features[-1], 1)
         net = torch.flatten(net, 1)
         net = self.classifier(net)
         return net
@@ -150,31 +158,31 @@ def _espnerv2(arch, pretrained=False, progress=True, **kwargs):
             model.load_state_dict(state_dict)
     return model
 
-
+@BACKBONE_REGISTER.register()
 def espnetv2_s_0_5(pretrained=False, progross=True, **kwargs):
     kwargs["scale"] = 0.5
     model = _espnerv2("espnetv2_s_0_5", pretrained=pretrained, progress=progross, **kwargs)
     return model
 
-
+@BACKBONE_REGISTER.register()
 def espnetv2_s_1_0(pretrained=False, progross=True, **kwargs):
     kwargs["scale"] = 1.0
     model = _espnerv2("espnetv2_s_1_0", pretrained=pretrained, progress=progross, **kwargs)
     return model
 
-
+@BACKBONE_REGISTER.register()
 def espnetv2_s_1_25(pretrained=False, progross=True, **kwargs):
     kwargs["scale"] = 1.25
     model = _espnerv2("espnetv2_s_1_25", pretrained=pretrained, progress=progross, **kwargs)
     return model
 
-
+@BACKBONE_REGISTER.register()
 def espnetv2_s_1_5(pretrained=False, progross=True, **kwargs):
     kwargs["scale"] = 1.5
     model = _espnerv2("espnetv2_s_1_5", pretrained=pretrained, progress=progross, **kwargs)
     return model
 
-
+@BACKBONE_REGISTER.register()
 def espnetv2_s_2_0(pretrained=False, progross=True, **kwargs):
     kwargs["scale"] = 2.0
     model = _espnerv2("espnetv2_s_2_0", pretrained=pretrained, progress=progross, **kwargs)

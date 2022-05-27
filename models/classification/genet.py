@@ -13,6 +13,7 @@ from __future__ import division
 import torch
 import torch.nn as nn
 
+from .create_model import BACKBONE_REGISTER
 __all__ = ["GENet", "genet_small", "genet_normal", "genet_large"]
 
 class XXBlock(nn.Module):
@@ -199,20 +200,23 @@ class GENet(nn.Module):
         elif block_type.lower() == "bl":
             return BottleBlock
 
-    def forward(self, x):
+    def forward_features(self, x):
         net = x
         features = []
         for i, layer in enumerate(self.features.values()):
             net = layer(net)
             features.append(net)
+        return features
+
+    def forward(self, x):
+        features = self.forward_features(x)
         if self.features_only:
             return features
-        net = self.global_avg(net)
+        net = self.global_avg(features[-1])
         net = self.classifier(net)
         return net
 
 
-list
 cfg = {
     "genet_small":[
         ["conv", 1, 13, 2, 3, 1],
@@ -253,12 +257,15 @@ def _create_model(model_name, **kwargs):
     model = GENet(cfg, **kwargs)
     return model
 
+@BACKBONE_REGISTER.register()
 def genet_small(**kwargs):
     return _create_model("genet_small", **kwargs)
 
+@BACKBONE_REGISTER.register()
 def genet_normal(**kwargs):
     return _create_model("genet_normal", **kwargs)
 
+@BACKBONE_REGISTER.register()
 def genet_large(**kwargs):
     return _create_model("genet_large", **kwargs)
 

@@ -19,6 +19,8 @@ import re
 from layers.utils import *
 from layers.splat import *
 
+from .create_model import BACKBONE_REGISTER
+
 __all__ = ['ResNet', 'resnet18', 'resnet34', 'resnet50', 'resnet101',
            'resnet152', 'resnext50_32x4d', 'resnext101_32x8d',
            'wide_resnet50_2', 'wide_resnet101_2', 'seresnet18', 'seresnet34',
@@ -616,7 +618,7 @@ def _resnet(arch, block, blocks, pretrained=False, progress=True, **kwargs):
         model.load_state_dict(state_dict)
     return model
 
-
+@BACKBONE_REGISTER.register()
 def resnet18(pretrained=False, progress=True, **kwargs):
     """ResNet-18 model from
     `"Deep Residual Learning for Image Recognition" <https://arxiv.org/pdf/1512.03385.pdf>`_
@@ -626,7 +628,7 @@ def resnet18(pretrained=False, progress=True, **kwargs):
     """
     return _resnet("resnet18", BasicBlock, get_layers(18), pretrained, progress, **kwargs)
 
-
+@BACKBONE_REGISTER.register()
 def resnet34(pretrained=False, progress=True, **kwargs):
     """ResNet-34 model from
     `"Deep Residual Learning for Image Recognition" <https://arxiv.org/pdf/1512.03385.pdf>`_
@@ -636,7 +638,7 @@ def resnet34(pretrained=False, progress=True, **kwargs):
     """
     return _resnet("resnet34", BasicBlock, get_layers(34), pretrained, progress, **kwargs)
 
-
+@BACKBONE_REGISTER.register()
 def resnet50(pretrained=False, progress=True, **kwargs):
     """ResNet-50 model from
     `"Deep Residual Learning for Image Recognition" <https://arxiv.org/pdf/1512.03385.pdf>`_
@@ -646,7 +648,7 @@ def resnet50(pretrained=False, progress=True, **kwargs):
     """
     return _resnet("resnet50", Bottleneck, get_layers(50), pretrained, progress, **kwargs)
 
-
+@BACKBONE_REGISTER.register()
 def resnet101(pretrained=False, progress=True, **kwargs):
     """ResNet-101 model from
     `"Deep Residual Learning for Image Recognition" <https://arxiv.org/pdf/1512.03385.pdf>`_
@@ -656,7 +658,7 @@ def resnet101(pretrained=False, progress=True, **kwargs):
     """
     return _resnet("resnet101", Bottleneck, get_layers(101), pretrained, progress, **kwargs)
 
-
+@BACKBONE_REGISTER.register()
 def resnet152(pretrained=False, progress=True, **kwargs):
     r"""ResNet-152 model from
     `"Deep Residual Learning for Image Recognition" <https://arxiv.org/pdf/1512.03385.pdf>`_
@@ -667,7 +669,7 @@ def resnet152(pretrained=False, progress=True, **kwargs):
 
     return _resnet("resnet152", Bottleneck, get_layers(152), pretrained, progress, **kwargs)
 
-
+@BACKBONE_REGISTER.register()
 def resnext50_32x4d(pretrained=False, progress=True, **kwargs):
     r"""
     ResNeXt-50 32x4d model from
@@ -680,7 +682,7 @@ def resnext50_32x4d(pretrained=False, progress=True, **kwargs):
     kwargs["width_per_group"] = 4
     return _resnet("resnext50_32x4d", Bottleneck, get_layers(50), pretrained, progress, **kwargs)
 
-
+@BACKBONE_REGISTER.register()
 def resnext101_32x8d(pretrained=False, progress=True, **kwargs):
     r"""
     ResNeXt-50 32x4d model from
@@ -693,7 +695,7 @@ def resnext101_32x8d(pretrained=False, progress=True, **kwargs):
     kwargs["width_per_group"] = 8
     return _resnet("resnext101_32x8d", Bottleneck, get_layers(101), pretrained, progress, **kwargs)
 
-
+@BACKBONE_REGISTER.register()
 def wide_resnet50_2(pretrained=False, progress=True, **kwargs):
     """
     Wide ResNet-50-2 model from
@@ -705,7 +707,7 @@ def wide_resnet50_2(pretrained=False, progress=True, **kwargs):
     kwargs["width_per_group"] = 64 * 2
     return _resnet("wide_resnet_50_2", Bottleneck, get_layers(50), pretrained, progress, **kwargs)
 
-
+@BACKBONE_REGISTER.register()
 def wide_resnet101_2(pretrained=False, progress=True, **kwargs):
     """
     Wide ResNet-101-2 model from
@@ -717,7 +719,7 @@ def wide_resnet101_2(pretrained=False, progress=True, **kwargs):
     kwargs["width_per_group"] = 64 * 2
     return _resnet("wide_resnet_101_2", Bottleneck, get_layers(101), pretrained, progress, **kwargs)
 
-
+@BACKBONE_REGISTER.register()
 def seresnet18(pretrained=False, progress=True, **kwargs):
     """SEResNet-18 model from
     `"Squeeze-and-Excitation Networks"<https://arxiv.org/abs/1709.01507>`_
@@ -728,7 +730,7 @@ def seresnet18(pretrained=False, progress=True, **kwargs):
     kwargs["se_module"] = SEModule
     return _resnet("seresnet18", BasicBlock, get_layers(18), pretrained, progress, **kwargs)
 
-
+@BACKBONE_REGISTER.register()
 def seresnet34(pretrained=False, progress=True, **kwargs):
     """SEResNet-34 model from
     `"Squeeze-and-Excitation Networks"<https://arxiv.org/abs/1709.01507>`_
@@ -739,7 +741,7 @@ def seresnet34(pretrained=False, progress=True, **kwargs):
     kwargs["se_module"] = SEModule
     return _resnet("seresnet34", BasicBlock, get_layers(34), pretrained, progress, **kwargs)
 
-
+@BACKBONE_REGISTER.register()
 def seresnet50(pretrained=False, progress=True, **kwargs):
     """SEResNet-50 model from
     `"Squeeze-and-Excitation Networks"<https://arxiv.org/abs/1709.01507>`_
@@ -750,7 +752,7 @@ def seresnet50(pretrained=False, progress=True, **kwargs):
     kwargs["se_module"] = SEModule
     return _resnet("seresnet50", Bottleneck, get_layers(50), pretrained, progress, **kwargs)
 
-
+@BACKBONE_REGISTER.register()
 def seresnet101(pretrained=False, progress=True, **kwargs):
     """SEResNet-101 model from
     `"Squeeze-and-Excitation Networks"<https://arxiv.org/abs/1709.01507>`_
@@ -761,7 +763,7 @@ def seresnet101(pretrained=False, progress=True, **kwargs):
     kwargs["se_module"] = SEModule
     return _resnet("seresnet101", Bottleneck, get_layers(101), pretrained, progress, **kwargs)
 
-
+@BACKBONE_REGISTER.register()
 def seresnet152(pretrained=False, progress=True, **kwargs):
     """SEResNet-101 model from
     `"Squeeze-and-Excitation Networks"<https://arxiv.org/abs/1709.01507>`_
@@ -772,7 +774,7 @@ def seresnet152(pretrained=False, progress=True, **kwargs):
     kwargs["se_module"] = SEModule
     return _resnet("seresnet152", Bottleneck, get_layers(152), pretrained, progress, **kwargs)
 
-
+@BACKBONE_REGISTER.register()
 def seresnext50_32x4d(pretrained=False, progress=True, **kwargs):
     r"""
     SE-ResNeXt-50 32x4d model from
@@ -786,7 +788,7 @@ def seresnext50_32x4d(pretrained=False, progress=True, **kwargs):
     kwargs["se_module"] = SEModule
     return _resnet("seresnext50_32x4d", Bottleneck, get_layers(50), pretrained, progress, **kwargs)
 
-
+@BACKBONE_REGISTER.register()
 def seresnext101_32x8d(pretrained=False, progress=True, **kwargs):
     r"""
     SE-ResNeXt-101_32x8d model from
@@ -800,7 +802,7 @@ def seresnext101_32x8d(pretrained=False, progress=True, **kwargs):
     kwargs["se_module"] = SEModule
     return _resnet("seresnext101_32x8d", Bottleneck, get_layers(50), pretrained, progress, **kwargs)
 
-
+@BACKBONE_REGISTER.register()
 def resnest14(pretrained=False, progress=True, **kwargs):
     r"""
     ReNeSt-14 model from
@@ -819,7 +821,7 @@ def resnest14(pretrained=False, progress=True, **kwargs):
     kwargs["reduction"] = 4
     return _resnet("resnest14", Bottleneck, get_layers(14), pretrained, progress, **kwargs)
 
-
+@BACKBONE_REGISTER.register()
 def resnest26(pretrained=False, progress=True, **kwargs):
     r"""
     ReNeSt-26 model from
@@ -838,7 +840,7 @@ def resnest26(pretrained=False, progress=True, **kwargs):
     kwargs["reduction"] = 4
     return _resnet("resnest26", Bottleneck, get_layers(26), pretrained, progress, **kwargs)
 
-
+@BACKBONE_REGISTER.register()
 def resnest50(pretrained=False, progress=True, **kwargs):
     r"""
     ReNeSt-50 model from
@@ -856,7 +858,7 @@ def resnest50(pretrained=False, progress=True, **kwargs):
     kwargs["reduction"] = 4
     return _resnet("resnest50", Bottleneck, get_layers(50), pretrained, progress, **kwargs)
 
-
+@BACKBONE_REGISTER.register()
 def resnest101(pretrained=False, progress=True, **kwargs):
     r"""
     ReNeSt-101 model from
@@ -873,7 +875,7 @@ def resnest101(pretrained=False, progress=True, **kwargs):
     kwargs["reduction"] = 4
     return _resnet("resnest101", Bottleneck, get_layers(101), pretrained, progress, **kwargs)
 
-
+@BACKBONE_REGISTER.register()
 def resnest200(pretrained=False, progress=True, **kwargs):
     r"""
     ReNeSt-200 model from
@@ -890,7 +892,7 @@ def resnest200(pretrained=False, progress=True, **kwargs):
     kwargs["reduction"] = 4
     return _resnet("resnest200", Bottleneck, get_layers(200), pretrained, progress, **kwargs)
 
-
+@BACKBONE_REGISTER.register()
 def resnest269(pretrained=False, progress=True, **kwargs):
     r"""
     ReNeSt-269 model from

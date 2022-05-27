@@ -10,6 +10,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from .create_model import BACKBONE_REGISTER
+
 def make_division(chs, multiplier=1.0, min_depth=8, divisor=8):
     """Round number of filters based on depth multiplier."""
 
@@ -196,6 +198,7 @@ base_cfgs = {
     ]
 }
 
+@BACKBONE_REGISTER.register()
 def efficientnetv2_s(**kwargs):
     return _effnet_v2(base_cfgs["s1"], **kwargs)
 
