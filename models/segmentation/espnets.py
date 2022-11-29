@@ -15,7 +15,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from layers import EESP, Conv2d
-from models.segmentation.unet import SpatialFusion
+from layers.task_fusion import CrossGL
 from models.classification.espnets import *
 
 __all__ = ["ESPNetV2_Seg"]
@@ -58,7 +58,7 @@ def get_model(model_name):
     return model_dict[model_name]
 
 class ESPNetV2_Seg(nn.Module):
-    def __init__(self, in_ch=3, num_classes=20, backbone="espnetv2_s_1_0", s=1, pretrained=False, super_reso=False, upscale_rate=2):
+    def __init__(self, in_ch=3, num_classes=20, backbone="espnetv2_s_2_0", s=1, pretrained=False, super_reso=False, upscale_rate=2):
         """
         Implementation espnetv2 for segmentation
         References:
@@ -145,7 +145,7 @@ class ESPNetV2_Seg(nn.Module):
                 nn.Conv2d(32, (upscale_rate ** 2) * in_ch, kernel_size=3, stride=1, padding=1, bias=False),
                 nn.PixelShuffle(upscale_factor=upscale_rate)
             )
-            self.query = SpatialFusion(in_ch, num_classes)
+            self.fusion = CrossGL(ch, ch-in_ch+num_classes)
 
     def hierarchicalUpsample(self, x, upscale_range=3):
         for _ in range(upscale_range):
@@ -205,12 +205,19 @@ class ESPNetV2_Seg(nn.Module):
                 sr_merged_l1 = torch.cat([out_l1, sr_up_l2_to_l1], dim=1)
                 sr_out_proj_l1 = self.sr_project_l1(sr_merged_l1)
                 sr_out_proj_l1 = F.interpolate(sr_out_proj_l1, scale_factor=2, mode="bilinear", align_corners=True)
+                sr_fe, seg_fe = self.fusion(sr_merged_l1, merged_l1)
                 sr = self.super_conv(sr_out_proj_l1)
-                qr_proj_l1 = self.query(sr, out_proj_l1)
+                sr_fusion = self.sr_project_l1(sr_fe)
+                sr_fusion = F.interpolate(sr_fusion, scale_factor=2, mode="bilinear", align_corners=True)
+                sr_fusion = self.super_conv(sr_fusion)
+                seg_fusion = self.project_l1(seg_fe)
+                seg_fusion = F.interpolate(seg_fusion, scale_factor=2, mode="bilinear", align_corners=True)
+                seg_fusion = F.interpolate(seg_fusion, size=out_proj_l1.size()[2:], mode="bilinear", align_corners=True)
+
 
         if self.training:
             if self.super_reso:
-                return out_proj_l1, proj_l3, sr, qr_proj_l1
+                return out_proj_l1, proj_l3, sr, sr_fusion, seg_fusion
             return out_proj_l1, proj_l3
         else:
             return out_proj_l1
@@ -218,6 +225,6 @@ class ESPNetV2_Seg(nn.Module):
 
 
 if __name__ == "__main__":
-    model = ESPNetV2_Seg(3, num_classes=20, pretrained=True)
-    out1, out2 = model(torch.randn(size=(1, 3, 224, 224)))
-    print(out1.shape)
+    model = ESPNetV2_Seg(3, num_classes=19, pretrained=True, super_reso=True, backbone="espnetv2_s_1_25")
+    out1, out2, out3, out4, out5 = model(torch.randn(1, 3, 512, 512))
+    print(out4.shape)

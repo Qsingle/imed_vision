@@ -12,6 +12,7 @@ from .genet import *
 from .mixformer import *
 from .resnet import *
 from .stdcnet import stdcnet_1, stdcnet_2
+from .gmlp import *
 
 from .create_model import create_backbone, BACKBONE_REGISTER
 

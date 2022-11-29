@@ -1,9 +1,9 @@
 {
-   "image_dir" : "D:/workspace/MachineLearning/MegVision/data/octa6m/test/images",
-  "image_suffix": ".png",
-  "mask_dir": "D:/workspace/MachineLearning/MegVision/data/octa6m/test/labels",
-  "mask_suffix": ".png",
-  "image_size": [200, 200],
+  "image_dir" : "D:/workspace/datasets/segmentation/DRHAGIS/Fundus_Images",
+  "image_suffix": ".jpg",
+  "mask_dir": "D:/workspace/datasets/segmentation/DRHAGIS/Manual_Segmentations",
+  "mask_suffix": "_manual_orig.png",
+  "image_size": [792, 1188],
   "super_reso": true,
   "fusion": true,
   "num_classes": 2,
@@ -12,8 +12,11 @@
   "model_name": "unet",
   "block_name": "origin",
   "channel": 3,
-  "upscale_rate": 2,
-  "weights": "ckpt/unet_origin/octa6m/unet_origin_octa6m_best.pth",
+  "upscale_rate": 4,
+  "weights": "unet_origin_hrf_best.pth",
   "dataset": "octa6m",
-  "output_dir": "output/octa6m/unet_test_fusion"
+  "output_dir": "../drhagis",
+  "sr_preprocess": false,
+  "sr_checkpoint": null,
+  "color_map": {"1":[255, 0, 0], "2": [0, 0, 255]}
 }

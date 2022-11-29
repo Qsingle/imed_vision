@@ -10,6 +10,7 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from collections import OrderedDict
 
 from layers import Conv2d, EESP, SESSP
 
@@ -19,11 +20,11 @@ __all__ = ["EspNetV2", "espnetv2_s_0_5", "espnetv2_s_1_0",
            "espnetv2_s_1_25", "espnetv2_s_1_5", "espnetv2_s_2_0"]
 
 model_urls = {
-    "espnetv2_s_0_5": "https://github.com/sacmehta/ESPNetv2/blob/master/imagenet/pretrained_weights/espnetv2_s_0.5.pth",
-    "espnetv2_s_1_0": "https://github.com/sacmehta/ESPNetv2/blob/master/imagenet/pretrained_weights/espnetv2_s_1.0.pth",
-    "espnetv2_s_1_25": "https://github.com/sacmehta/ESPNetv2/blob/master/imagenet/pretrained_weights/espnetv2_s_1.25.pth",
-    "espnetv2_s_1_5": "https://github.com/sacmehta/ESPNetv2/blob/master/imagenet/pretrained_weights/espnetv2_s_1.5.pth",
-    "espnetv2_s_2_0": "https://github.com/sacmehta/ESPNetv2/blob/master/imagenet/pretrained_weights/espnetv2_s_2.0.pth"
+    "espnetv2_s_0_5": "https://github.com/Qsingle/imed_vision/releases/download/V0.1/espnetv2_s_0_5.pth",
+    "espnetv2_s_1_0": "https://github.com/Qsingle/imed_vision/releases/download/V0.1/espnetv2_s_1_0.pth",
+    "espnetv2_s_1_25": "https://github.com/Qsingle/imed_vision/releases/download/V0.1/espnetv2_s_1_25.pth",
+    "espnetv2_s_1_5": "https://github.com/Qsingle/imed_vision/releases/download/V0.1/espnetv2_s_1_5.pth",
+    "espnetv2_s_2_0": "https://github.com/Qsingle/imed_vision/releases/download/V0.1/espnetv2_s_2_0.pth"
 }
 
 
@@ -155,7 +156,13 @@ def _espnerv2(arch, pretrained=False, progress=True, **kwargs):
             print("The weights file of {} is not provided now, pass to load pretrained weights".format(arch))
         else:
             state_dict = torch.hub.load_state_dict_from_url(model_urls[arch], model_dir="./weights", progress=progress)
-            model.load_state_dict(state_dict)
+            new_state_dict = OrderedDict()
+            for k, v in state_dict.items():
+                if k.startswith("module."):
+                    new_state_dict[k[7:]] = v
+                else:
+                    new_state_dict[k] = v
+            model.load_state_dict(new_state_dict)
     return model
 
 @BACKBONE_REGISTER.register()

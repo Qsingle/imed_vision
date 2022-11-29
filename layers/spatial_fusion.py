@@ -29,8 +29,8 @@ class SpatialFusion(nn.Module):
         self.fusion = nn.Sequential(
             nn.ReLU(),
             nn.Conv2d(hidden_state, seg_ch, 1, 1),
-            # nn.Softmax(dim=1)
-            nn.Sigmoid()
+            nn.Softmax(dim=1)
+            # nn.Sigmoid()
         )
 
     def forward(self, sr_fe, seg_fe):

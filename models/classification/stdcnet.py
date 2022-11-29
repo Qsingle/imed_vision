@@ -58,6 +58,7 @@ class STDCNet(nn.Module):
         features = []
         net = self.conv1(x)
         net = self.conv2(net)
+        features.append(net)
         net = self.stage3(net)
         features.append(net)
         net = self.stage4(net)

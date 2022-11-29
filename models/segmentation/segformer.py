@@ -13,6 +13,8 @@ import torch.nn.functional as F
 from models.classification.mixformer import *
 from models.classification.create_model import create_backbone
 
+from layers.spatial_fusion import SpatialFusion
+
 __all__ = ["segformer_b0", "segformer_b1", "segformer_b2", "segformer_b3", "segformer_b4", "segformer_b5", "SegFormer"]
 
 # backbones = {
@@ -67,6 +69,8 @@ class SegFormer(nn.Module):
         assert arch in ["mit_b0", "mit_b1", "mit_b2", "mit_b3", "mit_b4", "mit_b5"], "backbone arch must in " \
                                                                                      "['mit_b0', 'mit_b1', 'mit_b2', " \
                                                                                      "'mit_b3', 'mit_b4', 'mit_b5']"
+        self.super_reso = kwargs.get("super_reso", False)
+        self.upscale_rate = kwargs.get("upscale_rate", 2)
         self.encoder = create_backbone(arch, img_size=img_size, **kwargs)
         if pretrained:
             assert pretrained_weights is not None
@@ -76,12 +80,33 @@ class SegFormer(nn.Module):
 
         self.decoder = Decoder(dims, embd_dim, drop_out=drop_rate)
         self.out_conv = nn.Conv2d(embd_dim, num_classes, 1, 1, 0)
+        if self.super_reso:
+            self.sr_decoder = Decoder(dims, embd_dim, drop_out=drop_rate)
+            in_ch = kwargs.get("in_chans", 3)
+            self.fusion = SpatialFusion(in_ch, num_classes)
+            self.sr_conv = nn.Sequential(
+                nn.Conv2d(embd_dim, 64, 5, 1, 2),
+                nn.Tanh(),
+                nn.Conv2d(64, 32, 3, 1, 1),
+                nn.Tanh(),
+                nn.Conv2d(32, self.upscale_rate**2*in_ch, 3, 1, 1),
+                nn.PixelShuffle(self.upscale_rate)
+            )
 
     def forward(self, x):
         features = self.encoder.forward_features(x)
         decoder_feature = self.decoder(features)
         out = self.out_conv(decoder_feature)
         out = F.interpolate(out, size=x.shape[2:], mode="bilinear", align_corners=False)
+        if self.super_reso:
+            out = F.interpolate(out, scale_factor=self.upscale_rate, mode="bilinear", align_corners=False)
+            if self.training:
+                sr_de = self.sr_decoder(features)
+                sr_de = F.interpolate(sr_de, size=x.shape[2:], mode="bilinear", align_corners=False)
+                sr = self.sr_conv(sr_de)
+                fusion = self.fusion(sr, out)
+                fusion_seg = fusion*out + out
+                return out, sr, fusion_seg
         return out
 
 
@@ -109,6 +134,6 @@ if __name__ == "__main__":
     import os
     sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     x = torch.randn(1, 3, 1024, 1024)
-    model = segformer_b0(img_size=1024)
+    model = segformer_b0(img_size=1024, super_reso=True)
     out = model(x)
-    print(out.shape)
+    print(out[0].shape)

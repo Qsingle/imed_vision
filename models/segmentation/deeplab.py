@@ -14,21 +14,9 @@ import torch.nn.functional as F
 # from models.classification.resnet import *
 from models.classification import create_backbone
 from layers.utils import *
-from layers.spatial_fusion import SpatialFusion
+from layers.task_fusion import CrossGL
 
 __all__ = ["DeeplabV3", "DeeplabV3Plus", "ASPP", "ImagePooling"]
-
-# backbones = {
-#     "resnet50":resnet50,
-#     "resnet101":resnet101,
-#     "resnest50" : resnest50,
-#     "resnest101" : resnest101,
-#     "resnest200" : resnest200,
-#     "resnest269" : resnest269,
-#     "seresnet50" : seresnet50,
-#     "resnest26" : resnest26,
-#     "resnest14" : resnest14
-# }
 
 
 class ImagePooling(nn.Module):
@@ -160,7 +148,7 @@ class RCAB(nn.Module):
     
 
 class Decoder(nn.Module):
-    def __init__(self, low_ch, high_ch, out_ch):
+    def __init__(self, low_ch, high_ch):
         super(Decoder, self).__init__()
         self.conv_low = nn.Conv2d(low_ch, 48, 1, 1)
         fusion_ch = 48 + high_ch
@@ -168,15 +156,13 @@ class Decoder(nn.Module):
             Conv2d(fusion_ch, out_ch=256, ksize=3, stride=1, padding=1),
             Conv2d(256, 256, ksize=3, stride=1, padding=1),
         )
-        self.out_conv = nn.Conv2d(256, out_ch, kernel_size=1, stride=1)
 
     def forward(self, low_fe, high_fe):
         low_fe = self.conv_low(low_fe)
         high_fe = F.interpolate(high_fe, size=low_fe.size()[2:], mode="bilinear", align_corners=False)
         concat = torch.cat([low_fe, high_fe], dim=1)
         fusion_out = self.fusion_conv(concat)
-        out = self.out_conv(fusion_out)
-        return out
+        return fusion_out
 
 class DeeplabV3Plus(nn.Module):
     def __init__(self, in_ch, num_classes, backbone="resnet50",  output_stride=16,
@@ -192,7 +178,7 @@ class DeeplabV3Plus(nn.Module):
             dilations = [1, 1, 1, 2]
             rates = [1, 12, 24, 36]
         else:
-            raise ValueError("Unknown output stride, except 16 or 8 but got {}".format(output_stride))
+            raise ValueError("Unknown output stride, e xcept 16 or 8 but got {}".format(output_stride))
 
         multi_grids = [1, 2, 4]
         # self.backbone = backbones[backbone](in_ch=in_ch, strides=strides,
@@ -214,20 +200,22 @@ class DeeplabV3Plus(nn.Module):
 
         del self.backbone.avg_pool
         del self.backbone.fc
-        self.aspp = ASPP(in_planes=2048, out_ch=256, rates=rates)
+        self.aspp = ASPP(in_planes=2048, out_ch=256, rates=rates, norm_layer=norm_layer,
+                         activation=activation)
         if middle_layer:
             low_ch = 512
         else:
             low_ch = 256
-        self.decoder_seg = Decoder(low_ch, 256, num_classes)
+        self.decoder_seg = Decoder(low_ch, 256)
         self.middle_layer = middle_layer
         self.super_reso = super_reso
         self.upscale_rate = upscale_rate
         self.sr_seg_fusion = sr_seg_fusion and self.super_reso
+        self.out_conv = nn.Conv2d(256, num_classes, 1, 1)
         if super_reso:
-            self.decoder_sr = Decoder(low_ch, 256, 64)
+            self.decoder_sr = Decoder(low_ch, 256)
             self.sr = nn.Sequential(
-                nn.Conv2d(64, 64, kernel_size=5, stride=1, padding=2, bias=False),
+                nn.Conv2d(256, 64, kernel_size=5, stride=1, padding=2, bias=False),
                 nn.Tanh(),
                 nn.Conv2d(64, 32, kernel_size=3, stride=1, padding=1, bias=False),
                 nn.Tanh(),
@@ -235,7 +223,7 @@ class DeeplabV3Plus(nn.Module):
                 nn.PixelShuffle(upscale_factor=upscale_rate)
             )
             if self.sr_seg_fusion:
-                self.sr_seg_fusion_module = SpatialFusion(in_ch, num_classes)
+                self.sr_seg_fusion_module = CrossGL(256, 256)
 
 
     def forward(self, x):
@@ -255,25 +243,30 @@ class DeeplabV3Plus(nn.Module):
             h = features[1]
         aspp = self.aspp(features[-1])
         net = self.decoder_seg(h, aspp)
-        net = F.interpolate(net, size=size, mode="bilinear", align_corners=False)
+        seg_out = self.out_conv(net)
+        seg_out = F.interpolate(seg_out, size=size, mode="bilinear", align_corners=False)
         sr = None
         fusion_sr = None
         fusion_seg = None
         if self.super_reso:
-            net = F.interpolate(net, scale_factor=self.upscale_rate, align_corners=False, mode="bilinear")
+            seg_out = F.interpolate(seg_out, scale_factor=self.upscale_rate, align_corners=False, mode="bilinear")
             if self.training:
                 sr_fe = self.decoder_sr(h, aspp)
+                if self.sr_seg_fusion:
+                    fusion_sr, fusion_seg = self.sr_seg_fusion_module(sr_fe, net)
+                fusion_seg = self.out_conv(net)
+                fusion_seg = F.interpolate(fusion_seg, seg_out.size()[2:], mode="bilinear", align_corners=False)
                 sr_fe = F.interpolate(sr_fe, size=size, mode="bilinear", align_corners=False)
                 sr = self.sr(sr_fe)
-                if self.sr_seg_fusion:
-                    fusion = self.sr_seg_fusion_module(sr, net)
-                    fusion_seg = net * fusion + net
+                fusion_sr = F.interpolate(fusion_sr, size=size, mode="bilinear", align_corners=False)
+                fusion_sr = self.sr(fusion_sr)
+                    # fusion_seg = net * fusion + net
         if sr is not None:
             if self.super_reso and self.training:
                 if self.sr_seg_fusion:
-                    return net, sr, fusion_seg, fusion_sr
-                return net, sr
-        return net
+                    return seg_out, sr, fusion_seg, fusion_sr
+                return seg_out, sr
+        return seg_out
 
 if __name__ == "__main__":
     x = torch.randn((1, 3, 224, 224))

@@ -21,16 +21,15 @@ except:
 __all__ = ["DoubleConv3D", "Downsample3D", "Upsample3D", "AttentionBlock", "VGGBlock", "Upsample",
            "DoubleConv", "Downsample", "SplAtBlock", "RRBlock", "ResBlock", "ConvNeXtBlock"]
 
-
-
 class DoubleConv3D(nn.Module):
-    def __init__(self, in_ch, out_ch):
+    def __init__(self, in_ch, out_ch, reduction=1):
         super(DoubleConv3D, self).__init__()
+        hidden_ch = out_ch // reduction
         self.conv = nn.Sequential(
-            nn.Conv3d(in_ch, out_ch, kernel_size=3, stride=1, padding=1),
-            nn.BatchNorm3d(out_ch),
+            nn.Conv3d(in_ch, hidden_ch, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm3d(hidden_ch),
             nn.ReLU(inplace=True),
-            nn.Conv3d(out_ch, out_ch, kernel_size=3, stride=1, padding=1),
+            nn.Conv3d(hidden_ch, out_ch, kernel_size=3, stride=1, padding=1),
             nn.BatchNorm3d(out_ch),
             nn.ReLU(inplace=True)
         )
@@ -41,7 +40,7 @@ class DoubleConv3D(nn.Module):
 class Downsample3D(nn.Module):
     def __init__(self, in_ch, out_ch):
         super(Downsample3D, self).__init__()
-        self.conv = DoubleConv3D(in_ch, out_ch)
+        self.conv = DoubleConv3D(in_ch, out_ch, reduction=2)
         self.down = nn.MaxPool3d(3, stride=2, padding=1)
 
     def forward(self, x):
@@ -60,7 +59,6 @@ class Upsample3D(nn.Module):
         net = torch.cat([x1, up], dim=1)
         net = self.conv(net)
         return net
-
 
 class AttentionBlock(nn.Module):
     def __init__(self, in_ch_g, in_ch_l, out_ch):

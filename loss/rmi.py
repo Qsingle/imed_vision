@@ -347,8 +347,8 @@ class RMILoss(nn.Module):
         # combine the high dimension points from label and probability map. new shape [N, C, radius * radius, H, W]
         la_vectors, pr_vectors = map_get_pairs(labels_4D, probs_4D, radius=self.rmi_radius, is_combine=0)
 
-        la_vectors = la_vectors.view([n, c, self.half_d, -1]).type(torch.cuda.DoubleTensor).requires_grad_(False)
-        pr_vectors = pr_vectors.view([n, c, self.half_d, -1]).type(torch.cuda.DoubleTensor)
+        la_vectors = la_vectors.view([n, c, self.half_d, -1]).type(torch.DoubleTensor).requires_grad_(False)
+        pr_vectors = pr_vectors.view([n, c, self.half_d, -1]).type(torch.DoubleTensor)
 
         # small diagonal matrix, shape = [1, 1, radius * radius, radius * radius]
         diag_matrix = torch.eye(self.half_d).unsqueeze(dim=0).unsqueeze(dim=0)

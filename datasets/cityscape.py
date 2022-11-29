@@ -12,7 +12,7 @@ import os
 import glob
 from typing import Union,List
 from albumentations import Compose, ColorJitter, HorizontalFlip
-from albumentations import VerticalFlip, ChannelDropout, GaussianBlur
+from albumentations import VerticalFlip, RandomCrop
 from albumentations import Normalize, Resize, ShiftScaleRotate
 import cv2
 import numpy as np
@@ -65,12 +65,10 @@ class CityScapeDataset(Dataset):
         h, w = image.shape[:2]
         if self.augmentation:
             aug_task = [
-                ColorJitter(),
-                ShiftScaleRotate(interpolation=self.inter, scale_limit=0.5),
+                ColorJitter(brightness=0.5, contrast=0.5, saturation=0.5, hue=0.5),
+                ShiftScaleRotate(rotate_limit=45, scale_limit=0.5),
                 HorizontalFlip(),
-                VerticalFlip(),
-                ChannelDropout(),
-                GaussianBlur(),
+                VerticalFlip()
             ]
             aug = Compose(aug_task)
             aug_data = aug(image=image, mask=mask)
@@ -95,7 +93,8 @@ class CityScapeDataset(Dataset):
             channel = 3
         else:
             channel = 1
-        normalize = Normalize(mean=[0.5]*channel, std=[0.5]*channel)
+        normalize = Normalize(mean=[0.485, 0.456, 0.406],
+                            std=[0.229, 0.224, 0.225])
         # normalize = Normalize(mean=[0.39068785, 0.40521392, 0.41434407],
         #                       std=[0.29652068, 0.30514979, 0.30080369])
         normalize_data = normalize(image=image, mask=mask)

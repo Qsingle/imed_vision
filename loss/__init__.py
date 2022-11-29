@@ -13,3 +13,4 @@ from .tfm import TFM
 from .ibloss import IBLoss
 from .rmi import RMILoss
 from .detail_loss import DetailLoss
+from .ce import CBCE

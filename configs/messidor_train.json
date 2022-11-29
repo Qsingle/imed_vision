@@ -9,7 +9,7 @@
   "image_size": [774, 1280],
   "num_classes": 2,
   "gpu_index": "0",
-  "model_name": "ununet",
+  "model_name": "espcn",
   "channel": 3,
   "upscale_rate": 8,
   "num_workers": 4,

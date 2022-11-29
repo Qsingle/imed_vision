@@ -16,18 +16,19 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from layers.unet_blocks import *
-from layers.superpixel import SuperResolutionModule
+from layers.maf import MAF
 from layers.spatial_fusion import SpatialFusion
-from layers.task_fusion import LinearFusion
+from layers.fim import FIM
+from layers.task_fusion import CrossGL
 
-__all__ = ["Unet", "NestedUNet", "AttUnet"]
+__all__ = ["Unet", "NestedUNet", "AttUnet", "MiniUnet"]
 
 class Unet(nn.Module):
     def __init__(self, in_ch, out_ch, convblock=DoubleConv, expansion=1.0,
                  radix=2, drop_prob=0.0, reduction=4, norm_layer=nn.BatchNorm2d,
                  activation=nn.ReLU(inplace=True), avd=False, avd_first=False,
                  layer_attention=False, super_reso=False, upscale_rate=2, sr_layer=4,
-                 sr_seg_fusion=False, **kwargs):
+                 sr_seg_fusion=False, fim=False, before=True, l1=False, ss_maf=False,**kwargs):
         """
         Unet with different block.
         References:
@@ -47,79 +48,82 @@ class Unet(nn.Module):
             layer_attention (bool): whether use layer attention
             multi_head (bool): whether use multi-head attention
             num_head (int): number of head for multi-head attention
+            fim (bool): whether use SuperVessel
         """
         super(Unet, self).__init__()
-        self.down1 = Downsample(in_ch, 64, convblock=convblock, radix=radix, drop_prob=drop_prob,
+        base_ch = kwargs.pop("base_ch", 64)
+        self.down1 = Downsample(in_ch, base_ch, convblock=convblock, radix=radix, drop_prob=drop_prob,
                                 dilation=1, padding=1, reduction=reduction,avd=avd, avd_first=avd_first,
                                 norm_layer=norm_layer, activation=activation, expansion=expansion, **kwargs)
-        self.down2 = Downsample(64, 128, convblock=convblock, radix=radix, drop_prob=drop_prob,
+        self.down2 = Downsample(base_ch, base_ch*2, convblock=convblock, radix=radix, drop_prob=drop_prob,
                                 dilation=1, padding=1, reduction=reduction,avd=avd, avd_first=avd_first,
                                 norm_layer=norm_layer, activation=activation, expansion=expansion, **kwargs)
-        self.down3 = Downsample(128, 256, convblock=convblock, radix=radix, drop_prob=drop_prob,
+        self.down3 = Downsample(base_ch*2, base_ch*4, convblock=convblock, radix=radix, drop_prob=drop_prob,
                                 dilation=1, padding=1, reduction=reduction,avd=avd, avd_first=avd_first,
                                 norm_layer=norm_layer, activation=activation, expansion=expansion, **kwargs)
-        self.down4 = Downsample(256, 512, convblock=convblock, radix=radix, drop_prob=drop_prob,
+        self.down4 = Downsample(base_ch*4, base_ch*8, convblock=convblock, radix=radix, drop_prob=drop_prob,
                                 dilation=1, padding=1, reduction=reduction,avd=avd, avd_first=avd_first,
                                 norm_layer=norm_layer, activation=activation, expansion=expansion, **kwargs)
-        self.down5 = convblock(512, 1024, radix=radix, drop_prob=drop_prob,
+        self.down5 = convblock(base_ch*8, base_ch*16, radix=radix, drop_prob=drop_prob,
                                 dilation=1, padding=1, reduction=reduction,avd=avd, avd_first=avd_first,
                                 norm_layer=norm_layer, activation=activation, expansion=expansion, **kwargs)
         self.layer_attention = layer_attention
         self.super_reso = super_reso
-        if super_reso:
-            self.sup = SuperResolutionModule(64)
-            self.sup_conv = convblock(3, 64, radix=radix, drop_prob=drop_prob,
-                                dilation=1, padding=1, reduction=reduction,avd=avd, avd_first=avd_first,
-                                norm_layer=norm_layer, activation=activation, expansion=expansion, **kwargs)
-            self.sup_down = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
         #
-        self.up6 = Upsample(1024, 512, 512, convblock=convblock, radix=radix, drop_prob=drop_prob,
+        self.up6 = Upsample(base_ch*16, base_ch*8, base_ch*8, convblock=convblock, radix=radix, drop_prob=drop_prob,
                                 dilation=1, padding=1, reduction=reduction, avd=avd, avd_first=avd_first,
                                 norm_layer=norm_layer, activation=activation, expansion=expansion, **kwargs)
-        self.up7 = Upsample(512, 256, 256, convblock=convblock, radix=radix, drop_prob=drop_prob,
+        self.up7 = Upsample(base_ch*8, base_ch*4, base_ch*4, convblock=convblock, radix=radix, drop_prob=drop_prob,
                                 dilation=1, padding=1, reduction=reduction, avd=avd, avd_first=avd_first,
                                 norm_layer=norm_layer, activation=activation, expansion=expansion, **kwargs)
-        self.up8 = Upsample(256, 128, 128, convblock=convblock, radix=radix, drop_prob=drop_prob,
-                                dilation=1, padding=1, reduction=reduction, avd=avd, avd_first=avd_first,
-                                norm_layer=norm_layer, activation=activation, expansion=expansion, **kwargs)
-
-        self.up9 = Upsample(128, 64, 64, convblock=convblock, radix=radix, drop_prob=drop_prob,
+        self.up8 = Upsample(base_ch*4, base_ch*2, base_ch*2, convblock=convblock, radix=radix, drop_prob=drop_prob,
                                 dilation=1, padding=1, reduction=reduction, avd=avd, avd_first=avd_first,
                                 norm_layer=norm_layer, activation=activation, expansion=expansion, **kwargs)
 
-        self.out_conv = nn.Conv2d(64, out_ch, kernel_size=1, stride=1, padding=0)
+        self.up9 = Upsample(base_ch*2, base_ch, base_ch, convblock=convblock, radix=radix, drop_prob=drop_prob,
+                                dilation=1, padding=1, reduction=reduction, avd=avd, avd_first=avd_first,
+                                norm_layer=norm_layer, activation=activation, expansion=expansion, **kwargs)
+
+        self.out_conv = nn.Conv2d(base_ch, out_ch, kernel_size=1, stride=1, padding=0)
 
         self.upscale_rate = upscale_rate
+        self.upsample_way = kwargs.pop("upsample_way", 1)
+        if self.upsample_way == 2:
+            self.out_up = nn.Sequential(
+                nn.Conv2d(out_ch, out_ch * (upscale_rate ** 2), kernel_size=3, stride=1, padding=1, bias=False),
+                nn.PixelShuffle(upscale_factor=upscale_rate)
+            )
+        self.l1 = l1
         if super_reso:
             self.sr_layer = sr_layer
             if sr_layer == 4:
-                self.sr_up6 = Upsample(512, 256, 256, radix=radix, drop_prob=drop_prob,
+                self.sr_up6 = Upsample(base_ch*8, base_ch*4, base_ch*4, radix=radix, drop_prob=drop_prob,
                                 dilation=1, padding=1, reduction=reduction, avd=avd, avd_first=avd_first,
                                 norm_layer=norm_layer, activation=activation, expansion=expansion, **kwargs)
-                self.sr_up7 = Upsample(256, 128, 128,radix=radix, drop_prob=drop_prob,
+                self.sr_up7 = Upsample(base_ch*4, base_ch*2, base_ch*2,radix=radix, drop_prob=drop_prob,
                                 dilation=1, padding=1, reduction=reduction, avd=avd, avd_first=avd_first,
                                 norm_layer=norm_layer, activation=activation, expansion=expansion, **kwargs)
-                self.sr_up8 = Upsample(128, 64, 64, radix=radix, drop_prob=drop_prob,
+                self.sr_up8 = Upsample(base_ch*2, base_ch, base_ch, radix=radix, drop_prob=drop_prob,
                                 dilation=1, padding=1, reduction=reduction, avd=avd, avd_first=avd_first,
                                 norm_layer=norm_layer, activation=activation, expansion=expansion, **kwargs)
                 self.sr_up9 = nn.Identity()
             elif sr_layer == 5:
-                self.sr_up6 = Upsample(1024, 512, 512, radix=radix, drop_prob=drop_prob,
+                self.sr_up6 = Upsample(base_ch*16, base_ch*8, base_ch*8, radix=radix, drop_prob=drop_prob,
                                     dilation=1, padding=1, reduction=reduction, avd=avd, avd_first=avd_first,
                                     norm_layer=norm_layer, activation=activation, expansion=expansion, **kwargs)
-                self.sr_up7 = Upsample(512, 256, 256, convblock=convblock, radix=radix, drop_prob=drop_prob,
+                self.sr_up7 = Upsample(base_ch*8, base_ch*4, base_ch*4, convblock=convblock, radix=radix, drop_prob=drop_prob,
                                     dilation=1, padding=1, reduction=reduction, avd=avd, avd_first=avd_first,
                                     norm_layer=norm_layer, activation=activation, expansion=expansion, **kwargs)
-                self.sr_up8 = Upsample(256, 128, 128, convblock=convblock, radix=radix, drop_prob=drop_prob,
+                self.sr_up8 = Upsample(base_ch*4, base_ch*2, base_ch*2, convblock=convblock, radix=radix, drop_prob=drop_prob,
                                     dilation=1, padding=1, reduction=reduction, avd=avd, avd_first=avd_first,
                                     norm_layer=norm_layer, activation=activation, expansion=expansion, **kwargs)
 
-                self.sr_up9 = Upsample(128, 64, 64, convblock=convblock, radix=radix, drop_prob=drop_prob,
+                self.sr_up9 = Upsample(base_ch*2, base_ch, base_ch, convblock=convblock, radix=radix, drop_prob=drop_prob,
                                     dilation=1, padding=1, reduction=reduction, avd=avd, avd_first=avd_first,
                                     norm_layer=norm_layer, activation=activation, expansion=expansion, **kwargs)
 
             self.sr_module = nn.Sequential(
-                nn.Conv2d(64, 64, kernel_size=5, stride=1, padding=2, bias=False),
+                nn.Conv2d(base_ch, 64, kernel_size=5, stride=1, padding=2, bias=False),
                 nn.Tanh(),
                 nn.Conv2d(64, 32, kernel_size=3, stride=1, padding=1, bias=False),
                 nn.Tanh(),
@@ -127,14 +131,23 @@ class Unet(nn.Module):
                 nn.PixelShuffle(upscale_factor=upscale_rate)
             )
             self.sr_seg_fusion = sr_seg_fusion
-            self.upsample_way = kwargs.get("upsample_way", 1)
-            if self.upsample_way == 2:
-                self.out_up = nn.Sequential(
-                    nn.Conv2d(out_ch, out_ch*(upscale_rate**2), kernel_size=3, stride=1, padding=1, bias=False),
-                    nn.PixelShuffle(upscale_factor=upscale_rate)
-                )
+            self.before = before and not fim
+            self.fim = fim
             if sr_seg_fusion:
-                self.sr_seg_fusion_module = SpatialFusion(in_ch, out_ch)
+                # self.sr_seg_fusion_module = SpatialFusion(in_ch, out_ch)
+                if not self.before:
+                    if fim:
+                        self.sr_seg_fusion_module = FIM(in_ch, out_ch)
+                    else:
+                        self.sr_seg_fusion_module = CrossGL(in_ch, out_ch, 32)
+                else:
+                    # self.sr_seg_fusion_module = FeatureFusion(base_ch, base_ch, 32)
+                    if ss_maf:
+                        self.sr_seg_fusion_module = MAF(base_ch, base_ch)
+                    else:
+                        self.sr_seg_fusion_module = CrossGL(base_ch, base_ch)
+
+                # self.sr_seg_fusion_module = LinearFusion(base_ch, base_ch, 32)
                 # self.sr_seg_fusion_module = LinearFusion(in_ch, out_ch)
                 # self.fusion_mlp = nn.Sequential(
                 #     nn.Conv2d(out_ch, 32, 1, 1),
@@ -161,9 +174,7 @@ class Unet(nn.Module):
                 out = F.interpolate(out, size=(h * self.upscale_rate, w * self.upscale_rate), mode="bilinear",
                                 align_corners=True)
             elif self.upsample_way == 2:
-                out = F.interpolate(out, size=x.size()[2:], mode="bilinear", align_corners=True)
-                out = self.out_conv(out)
-
+                out = self.out_up(out)
 
         fusion_seg = None
         sr = None
@@ -173,7 +184,7 @@ class Unet(nn.Module):
                 sr_up6 = self.sr_up6(down4_f, down3_f)
                 sr_up7 = self.sr_up7(sr_up6, down2_f)
                 sr_up8 = self.sr_up8(sr_up7, down1_f)
-                sr_up9 = self.sr_up9(sr_up8)
+                sr_up9 = self.sr_up9(sr_up8, down1_f)
             elif self.sr_layer == 5:
                 sr_up6 = self.sr_up6(down5, down4_f)
                 sr_up7 = self.sr_up7(sr_up6, down3_f)
@@ -184,18 +195,186 @@ class Unet(nn.Module):
 
             sr = self.sr_module(sr_up9)
             if self.sr_seg_fusion:
-                fusion = self.sr_seg_fusion_module(sr, out)
-                fusion_seg = fusion*out + out
+                # fusion = self.sr_seg_fusion_module(sr, out)
+                # fusion_seg = fusion*out + out
+                if self.upsample_way == 1:
+                    out = F.interpolate(out, size=(h * self.upscale_rate, w * self.upscale_rate), mode="bilinear",
+                                        align_corners=True)
+                elif self.upsample_way == 2:
+                    out = self.out_up(out)
+                if self.before:
+                    fusion_sr, fusion_seg = self.sr_seg_fusion_module(sr_up9, up9)
+                    h, w = x.size()[2:]
+                    if self.upsample_way == 1:
+                        fusion_seg = F.interpolate(fusion_seg, size=(h * self.upscale_rate, w * self.upscale_rate), mode="bilinear",
+                                            align_corners=True)
+                    elif self.upsample_way == 2:
+                        fusion_seg = self.out_up(fusion_seg)
+                else:
+                    if self.fim:
+                        fusion_attention = self.sr_seg_fusion_module(sr, out)
+                        fusion_seg = fusion_attention*out
+                    else:
+                        fusion_sr, fusion_seg = self.sr_seg_fusion_module(sr, out)
+                    # fusion_seg = fusion_seg*out + out
+                    # fusion_sr = fusion_sr*sr + sr
                 # fusion_sr, fusion_seg = self.sr_seg_fusion_module(sr, out)
                 # fusion_sr = fusion*sr
 
         # out = torch.max(out, dim=1)[1]
         if self.super_reso and self.training:
+            if self.l1:
+                l1_loss = nn.functional.l1_loss
+                l1 = l1_loss(sr_up6, up6) + l1_loss(sr_up7, up7) + l1_loss(sr_up8, up8) + l1_loss(sr_up9, up9)
+                return out, sr, l1
             if self.sr_seg_fusion:
                 return out, sr, fusion_seg, fusion_sr
             return out, sr
         return out
 
+class MiniUnet(nn.Module):
+    def __init__(self, in_ch, out_ch, convblock=DoubleConv, expansion=1.0,
+                 radix=2, drop_prob=0.0, reduction=4, norm_layer=nn.BatchNorm2d,
+                 activation=nn.ReLU(inplace=True), avd=False, avd_first=False,
+                 layer_attention=False, super_reso=False, upscale_rate=2, sr_layer=4,
+                 sr_seg_fusion=False, **kwargs):
+        """
+        Unet with different block.
+        References:
+            "U-Net: Convolutional Networks for Biomedical Image Segmentation"<https://arxiv.org/pdf/1505.04597.pdf>
+        Args:
+            in_ch (int): number of channels for input
+            out_ch (int): number of channels for output
+            convblock (nn.Module):
+            radix (int): number of groups, default 2
+            drop_prob (float): dropout rate, default 0.0
+            expansion (float): expansion rate for channels, default 1.0
+            reduction (int): the reduction rate for Split Attention Conv2d
+            norm_layer (nn.Module): Normalization module
+            activation (nn.Module): Non-linear activation module
+            avd (bool): whether use avd layer
+            avd_first (bool): whether use avd layer before SplAtConv
+            layer_attention (bool): whether use layer attention
+            multi_head (bool): whether use multi-head attention
+            num_head (int): number of head for multi-head attention
+        """
+        super(MiniUnet, self).__init__()
+        base_ch = kwargs.pop("base_ch", 64)
+        self.down1 = Downsample(in_ch, base_ch, convblock=convblock, radix=radix, drop_prob=drop_prob,
+                                dilation=1, padding=1, reduction=reduction,avd=avd, avd_first=avd_first,
+                                norm_layer=norm_layer, activation=activation, expansion=expansion, **kwargs)
+        self.down2 = Downsample(base_ch, base_ch*2, convblock=convblock, radix=radix, drop_prob=drop_prob,
+                                dilation=1, padding=1, reduction=reduction,avd=avd, avd_first=avd_first,
+                                norm_layer=norm_layer, activation=activation, expansion=expansion, **kwargs)
+        self.down3 = Downsample(base_ch*2, base_ch*4, convblock=convblock, radix=radix, drop_prob=drop_prob,
+                                dilation=1, padding=1, reduction=reduction,avd=avd, avd_first=avd_first,
+                                norm_layer=norm_layer, activation=activation, expansion=expansion, **kwargs)
+        self.down4 = convblock(base_ch*4, base_ch*8, radix=radix, drop_prob=drop_prob,
+                                dilation=1, padding=1, reduction=reduction,avd=avd, avd_first=avd_first,
+                                norm_layer=norm_layer, activation=activation, expansion=expansion, **kwargs)
+        self.layer_attention = layer_attention
+        self.super_reso = super_reso
+        #
+        self.up6 = Upsample(base_ch*8, base_ch*4, base_ch*4, convblock=convblock, radix=radix, drop_prob=drop_prob,
+                                dilation=1, padding=1, reduction=reduction, avd=avd, avd_first=avd_first,
+                                norm_layer=norm_layer, activation=activation, expansion=expansion, **kwargs)
+        self.up7 = Upsample(base_ch*4, base_ch*2, base_ch*2, convblock=convblock, radix=radix, drop_prob=drop_prob,
+                                dilation=1, padding=1, reduction=reduction, avd=avd, avd_first=avd_first,
+                                norm_layer=norm_layer, activation=activation, expansion=expansion, **kwargs)
+        self.up8 = Upsample(base_ch*2, base_ch, base_ch, convblock=convblock, radix=radix, drop_prob=drop_prob,
+                                dilation=1, padding=1, reduction=reduction, avd=avd, avd_first=avd_first,
+                                norm_layer=norm_layer, activation=activation, expansion=expansion, **kwargs)
+
+        self.out_conv = nn.Conv2d(base_ch, out_ch, kernel_size=1, stride=1, padding=0)
+
+        self.upscale_rate = upscale_rate
+        if super_reso:
+            self.sr_layer = sr_layer
+            if sr_layer == 3:
+                self.sr_up6 = Upsample(base_ch*4, base_ch*2, base_ch*2, radix=radix, drop_prob=drop_prob,
+                                dilation=1, padding=1, reduction=reduction, avd=avd, avd_first=avd_first,
+                                norm_layer=norm_layer, activation=activation, expansion=expansion, **kwargs)
+                self.sr_up7 = Upsample(base_ch*2, base_ch, base_ch,radix=radix, drop_prob=drop_prob,
+                                dilation=1, padding=1, reduction=reduction, avd=avd, avd_first=avd_first,
+                                norm_layer=norm_layer, activation=activation, expansion=expansion, **kwargs)
+                self.sr_up8 = nn.Identity()
+            elif sr_layer == 4:
+                self.sr_up6 = Upsample(base_ch*8, base_ch*4, base_ch*4, radix=radix, drop_prob=drop_prob,
+                                    dilation=1, padding=1, reduction=reduction, avd=avd, avd_first=avd_first,
+                                    norm_layer=norm_layer, activation=activation, expansion=expansion, **kwargs)
+                self.sr_up7 = Upsample(base_ch*4, base_ch*2, base_ch*2, convblock=convblock, radix=radix, drop_prob=drop_prob,
+                                    dilation=1, padding=1, reduction=reduction, avd=avd, avd_first=avd_first,
+                                    norm_layer=norm_layer, activation=activation, expansion=expansion, **kwargs)
+                self.sr_up8 = Upsample(base_ch*2, base_ch, base_ch, convblock=convblock, radix=radix, drop_prob=drop_prob,
+                                    dilation=1, padding=1, reduction=reduction, avd=avd, avd_first=avd_first,
+                                    norm_layer=norm_layer, activation=activation, expansion=expansion, **kwargs)
+
+            self.sr_module = nn.Sequential(
+                nn.Conv2d(base_ch, 64, kernel_size=5, stride=1, padding=2, bias=False),
+                nn.Tanh(),
+                nn.Conv2d(64, 32, kernel_size=3, stride=1, padding=1, bias=False),
+                nn.Tanh(),
+                nn.Conv2d(32, (upscale_rate ** 2) * in_ch, kernel_size=3, stride=1, padding=1, bias=False),
+                nn.PixelShuffle(upscale_factor=upscale_rate)
+            )
+            self.sr_seg_fusion = sr_seg_fusion
+            self.upsample_way = kwargs.pop("upsample_way", 1)
+            if self.upsample_way == 2:
+                self.out_up = nn.Sequential(
+                    nn.Conv2d(out_ch, out_ch*(upscale_rate**2), kernel_size=3, stride=1, padding=1, bias=False),
+                    nn.PixelShuffle(upscale_factor=upscale_rate)
+                )
+            if sr_seg_fusion:
+                self.sr_seg_fusion_module = SpatialFusion(in_ch, out_ch)
+                # self.sr_seg_fusion_module = LinearFusion(in_ch, out_ch)
+
+    def forward(self, x):
+        down1_f, down1 = self.down1(x)
+        down2_f, down2 = self.down2(down1)
+        down3_f, down3 = self.down3(down2)
+        down4= self.down4(down3)
+        up6 = self.up6(down4, down3_f)
+        up7 = self.up7(up6, down2_f)
+        up8 = self.up8(up7, down1_f)
+        out = self.out_conv(up8)
+        if out.size() != x.size() and not self.super_reso:
+            out = F.interpolate(out, size=x.size()[2:], mode="bilinear", align_corners=True)
+        else:
+            h, w = x.size()[2:]
+            if self.upsample_way == 1:
+                out = F.interpolate(out, size=(h * self.upscale_rate, w * self.upscale_rate), mode="bilinear",
+                                align_corners=True)
+            elif self.upsample_way == 2:
+                out = self.out_up(out)
+                # out = self.out_conv(out)
+
+        fusion_seg = None
+        sr = None
+        fusion_sr = None
+        if self.super_reso and self.training:
+            if self.sr_layer == 3:
+                sr_up6 = self.sr_up6(down3_f, down2_f)
+                sr_up7 = self.sr_up7(sr_up6, down1_f)
+                sr_up8 = self.sr_up8(sr_up7)
+            elif self.sr_layer == 5:
+                sr_up6 = self.sr_up6(down4, down3_f)
+                sr_up7 = self.sr_up7(sr_up6, down2_f)
+                sr_up8 = self.sr_up8(sr_up7, down1_f)
+            else:
+                raise ValueError("Unknown sr layer number")
+
+            sr = self.sr_module(sr_up8)
+            if self.sr_seg_fusion:
+                fusion = self.sr_seg_fusion_module(sr, out)
+                fusion_seg = fusion*out + out
+                # fusion_sr, fusion_seg = self.sr_seg_fusion_module(sr, out)
+                # fusion_sr = fusion*sr
+
+        if self.super_reso and self.training:
+            if self.sr_seg_fusion:
+                return out, sr, fusion_seg, fusion_sr
+            return out, sr
+        return out
 
 class Up(nn.Module):
     def forward(self, fe, size):
@@ -335,9 +514,9 @@ class AttUnet(nn.Module):
 
 
 
-class UNet3DMultiModal(nn.Module):
+class UNet3D(nn.Module):
     def __init__(self, in_ch=1, num_classes=7):
-        super(UNet3DMultiModal, self).__init__()
+        super(UNet3D, self).__init__()
         self.modal1_down1 = Downsample3D(in_ch, 64)
         self.modal1_down2 = Downsample3D(64, 128)
         self.modal1_down3 = Downsample3D(128, 256)
@@ -351,10 +530,10 @@ class UNet3DMultiModal(nn.Module):
         )
 
     def forward(self, x):
-        modal1_1, modal1_down = self.modal1_down1(x)
-        modal1_2, modal1_down = self.modal1_down2(modal1_down)
-        modal1_3, modal1_down = self.modal1_down3(modal1_down)
-        modal1_4 = self.modal1_down4(modal1_down)
+        modal1_1, down = self.modal1_down1(x)
+        modal1_2, down = self.modal1_down2(down)
+        modal1_3, down = self.modal1_down3(down)
+        modal1_4 = self.modal1_down4(down)
 
         up5 = self.up5(modal1_3, modal1_4)
         up6 = self.up6(modal1_2, up5)
@@ -363,14 +542,12 @@ class UNet3DMultiModal(nn.Module):
         return out
 
 
-
-
-
 if __name__ == "__main__":
     #model = Unet(3, 3, convblock=SplAtBlock, expansion=4.0, avd=True, layer_attention=True)
     #model = MultiHeadLayerAttention(3, 64)
     # model = LayerAttentionModule(3, 3, expansion=1.0)
-    model = UNet3DMultiModal()
+    from scipy.ndimage.interpolation import affine_transform
+    model = UNet3D()
     # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     # model.to(device)
     x = torch.randn((2, 1, 20, 32, 32))

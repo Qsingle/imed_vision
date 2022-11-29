@@ -11,17 +11,36 @@ from __future__ import print_function
 from __future__ import division
 from __future__ import absolute_import
 
+import math
 import torch
+import torch.nn.functional as F
 import torch.nn as nn
 
-from .splat import SplAtConv2d
-
-__all__ = ["Conv2d",  "SEModule", "DepthWiseSeparableConv2d"]
+__all__ = ["Conv2d",  "SEModule", "DepthWiseSeparableConv2d", "DepthWiseConv2d", "SAMEConv2d"]
 
 
+class DepthWiseConv2d(nn.Module):
+    def __init__(self, in_ch, out_ch, ksize, stride=1, padding=0, dilation=1):
+        """
+        Depthwise conv2d
+        Args:
+            in_ch (int): number of channels for input
+            out_ch (int):  number of channels for output
+            ksize (Union[int,tuple]): kernel size
+            stride (Union[int, tuple]): slide stride for the conv
+            padding (Union[int, tuple]): padding size
+            dilation (Union[int,tuple]): dilation rate
+        """
+        super(DepthWiseConv2d, self).__init__()
+        self.conv = nn.Conv2d(in_ch, out_ch, kernel_size=ksize, stride=stride,
+                              padding=padding, dilation=dilation, groups=out_ch, bias=False)
+
+    def forward(self, x):
+        net = self.conv(x)
+        return net
 
 class SEModule(nn.Module):
-    def __init__(self, in_ch, reduction=16, norm_layer=None, sigmoid=None, activation=None):
+    def __init__(self, in_ch, reduction=0.25, norm_layer=None, sigmoid=None, activation=None):
         """
         SEModule of SENet and MobileNetV3
         Args:
@@ -34,12 +53,12 @@ class SEModule(nn.Module):
         super(SEModule, self).__init__()
         if activation is None:
             activation = nn.ReLU(inplace=True)
-        if norm_layer is None:
-            norm_layer = nn.BatchNorm2d
+        # if norm_layer is None:
+        #     norm_layer = nn.BatchNorm2d
         if sigmoid is None:
             sigmoid = nn.Sigmoid()
         self.avg_pool = nn.AdaptiveAvgPool2d(1)
-        inter_channel = in_ch // reduction
+        inter_channel = round(in_ch*reduction)
         self.fc = nn.Sequential(
             Conv2d(in_ch, inter_channel, ksize=1, stride=1, norm_layer=norm_layer, activation=activation),
             Conv2d(inter_channel, in_ch, ksize=1, stride=1, norm_layer=norm_layer, activation=sigmoid)
@@ -95,6 +114,58 @@ class Conv2d(nn.Module):
         return net
 
 
+def get_same_padding(x, k_size, stride, dilation=1):
+    """
+    Calculated same padding size as tf
+    X_{in} // s = X_{out}
+    X_{out} = ceil{\frac{X_{in}+2*Padding-dilation*(k_size-1)-1}{s} + 1}
+    --> Padding = (ceil(x/s)-1)*stride + d*(ksize-1) + 1 - x
+    Args:
+        x (int): input size
+        k_size (int): kernel_size
+        stride (int): stride
+        dilation (int): dilation rate
+
+    Returns:
+        int: padding size
+    """
+    paddin_size = (math.ceil(x / stride) - 1) * stride - x + (k_size-1)*dilation + 1
+    return max(paddin_size, 0)
+
+def same_pad(x, kernel_size, stride, dilation=(1, 1), padding_value=0):
+    """
+    Same padding
+    Args:
+        x (torch.Tensor): input tensor
+        kernel_size (tuple): kernel_size
+        stride (tuple): strides of the conv kernel
+        dilation (tuple): dilation rate
+        padding_value (float32): padding value
+
+    Returns:
+        torch.Tensor: tensor after padding
+    """
+    h, w = x.size()[-2:]
+    k_h, k_w = kernel_size[:]
+    s_h, s_w = stride[:]
+    d_h, d_w = dilation[:]
+    pad_h = get_same_padding(h, k_h, s_h, d_h)
+    pad_w = get_same_padding(w, k_w, s_w, d_w)
+    out = F.pad(x, [pad_h // 2, pad_h - pad_h // 2, pad_w // 2, pad_w - pad_w // 2], mode="constant", value=padding_value)
+    return out
+
+
+class SAMEConv2d(nn.Conv2d):
+    def __init__(self, in_ch, out_ch, ksize, stride=1, dilation=1, groups=1, **kwargs):
+        super(SAMEConv2d, self).__init__(in_channels=in_ch, out_channels=out_ch,
+                                         kernel_size=ksize, stride=stride, dilation=dilation,
+                                         groups=groups, **kwargs)
+
+    def forward(self, x):
+        x = same_pad(x, self.kernel_size, self.stride, self.dilation)
+        net = F.conv2d(x, self.weight, bias=self.bias, stride=self.stride,
+                       dilation=self.dilation, groups=self.groups)
+        return net
 
 class DepthWiseSeparableConv2d(nn.Module):
     def __init__(self, in_ch, out_ch, ksize=1, stride=1, padding=0, dilation=1, bias=False, **kwargs):
@@ -107,3 +178,8 @@ class DepthWiseSeparableConv2d(nn.Module):
         net = self.depth_wise(x)
         net = self.point_wise(net)
         return net
+
+if __name__ == "__main__":
+    x = torch.randn(1, 3, 224, 224)
+    conv = SAMEConv2d(3, 32, 3, 2, bias=False)
+    print(conv(x).shape)

@@ -19,7 +19,7 @@ class LayerNorm(nn.Module):
     def __init__(self, normalized_shape, eps=1e-5, data_format="channel_first"):
         super(LayerNorm, self).__init__()
         self.weight = nn.Parameter(torch.ones(normalized_shape))
-        self.bias = nn.Parameter(normalized_shape)
+        self.bias = nn.Parameter(torch.zeros(normalized_shape))
         self.eps = eps
         self.data_format = data_format
         assert data_format in ["channel_first", "channel_last"], "unsupported data format:{}, " \
@@ -37,3 +37,10 @@ class LayerNorm(nn.Module):
                 v = torch.mean((x - u).pow(2), dim=-1, keepdim=True)
                 x = (x - u) / (v + self.eps)
                 x = x*self.weight[None, None, :] + self.bias[None, None, :]
+            return x
+        else:
+            u = x.mean(1, keepdim=True)
+            s = (x - u).pow(2).mean(1, keepdim=True)
+            x = (x - u) / torch.sqrt(s + self.eps)
+            x = self.weight[:, None, None] * x + self.bias[:, None, None]
+            return x
