@@ -206,9 +206,202 @@ class MaxSA(nn.Module):
         net = unbind(net, patch_size, img_size).permute(0, 3, 1, 2)
         return net
 
+class Attention4D(nn.Module):
+    def __init__(self, num_head, dim, dim_k, att_ratio=4.,qkv_bias=True, proj_bias=True,
+                 rel_position=None, act_layer=None, downsample=False):
+        """
+        The efficient Multi-Head Attention in
+        "Rethinking Vision Transformers for MobileNet Size and Speed"<https://arxiv.org/abs/2212.08059>
+        Args:
+            num_head (int): Number of heads
+            dim (int): dim of the input
+            dim_k (int): dim of each head
+            att_ratio (float): expansion rate for the value tensor. (I don't know whether the official code add this)
+            qkv_bias (bool): option to switch the bias in qkv linear
+            proj_bias (bool): option to switch the bias in proj linear
+            rel_position (nn.Module): the relation position module
+            act_layer: nonlinear activation function
+            downsample(bool): whether downsample the key and value
+        """
+        super(Attention4D, self).__init__()
+        self.dim_k = dim_k
+        self.num_head = num_head
+        self.scale = dim_k ** -0.5
+        act_layer = nn.ReLU if act_layer is None else act_layer
+        self.q = nn.Sequential(
+            nn.Conv2d(dim, dim_k*num_head, 1, 1, 0, bias=qkv_bias),
+            nn.BatchNorm2d(dim_k*num_head)
+        )
+        self.k = nn.Sequential(
+            nn.Conv2d(dim, dim_k * num_head, 1, 1, 0, bias=qkv_bias),
+            nn.BatchNorm2d(dim_k * num_head)
+        )
+        self.d = int(dim_k*att_ratio)
+        self.dh = self.num_head * self.d
+        self.v = nn.Sequential(
+            nn.Conv2d(dim, self.dh, 1, 1, 0, bias=qkv_bias),
+            nn.BatchNorm2d(self.dh)
+        )
+        self.rel_pos = rel_position if rel_position else nn.Identity()
+        self.v_local = nn.Sequential(
+            nn.Conv2d(self.dh, self.dh, 3, 1, 1, groups=self.dh),
+            nn.BatchNorm2d(self.dh)
+        )
+
+        self.talking_head1 = nn.Conv2d(num_head, num_head, 1, 1, 0)
+        self.talking_head2 = nn.Conv2d(num_head, num_head, 1, 1, 0)
+        self.proj = nn.Sequential(
+            act_layer(),
+            nn.Conv2d(self.dh, dim, 1, bias=proj_bias),
+            nn.BatchNorm2d(dim)
+        )
+        self.downsample = nn.Conv2d(dim, dim, 3, 2, 1) if downsample else nn.Identity()
+
+    def forward(self, x):
+        B, C, H, W = x.size()
+        q = self.q(x).reshape(B, self.num_head, self.dim_k, -1).transpose(2, 3) #B, Num_Head, N, head_dim
+        x = self.downsample(x)
+        k = self.k(x).reshape(B, self.num_head, self.dim_k, -1) #B, Num_Head, head_dim, N
+        v = self.v(x)
+        v = self.v_local(v)
+        v = v.reshape(B, self.num_head, self.d, -1).transpose(2, 3) #B, Num_Head, N, head_dim
+        att = q @ k #B, Num_Head, N, N
+        att = att * self.scale
+        att = self.rel_pos(att)
+        att = self.talking_head1(att)
+        att = torch.softmax(att, dim=-1)
+        att = self.talking_head2(att)
+        net = att @ v #B, Num_Head, N, Head_Dim
+        net = net.transpose(2, 3).reshape(B, -1, H, W)
+        net = self.proj(net)
+        return net
+
+class QueryDown(nn.Module):
+    def __init__(self, in_ch, out_ch):
+        """
+        Used to downsample the Query as mentioned in Section 3.5
+        "Rethinking Vision Transformers for MobileNet Size and Speed"<https://arxiv.org/abs/2212.08059>
+        Args:
+            in_ch:
+            out_ch:
+        """
+        super(QueryDown, self).__init__()
+        self.conv = nn.Conv2d(in_ch, in_ch, 3, stride=2, padding=1, groups=in_ch)
+        self.gpool = nn.AvgPool2d(3, 2, 1)
+        self.proj = nn.Conv2d(in_ch, out_ch, 1, 1, 0)
+
+    def forward(self, x):
+        conv = self.conv(x)
+        pool = self.gpool(x)
+        net = conv + pool
+        net = self.proj(net)
+        return net
+class AttentionDownsample(nn.Module):
+    def __init__(self, num_head, dim, dim_k, att_ratio=4.,qkv_bias=True, proj_bias=True,
+                 rel_position=None, act_layer=None):
+        """
+        The attention based downsample in
+         "Rethinking Vision Transformers for MobileNet Size and Speed"<https://arxiv.org/abs/2212.08059>
+        Args:
+            num_head (int): Number of heads
+            dim (int): dim of the input
+            dim_k (int): dim of each head
+            att_ratio (float): expansion rate for the value tensor. (I don't know whether the official code add this)
+            qkv_bias (bool): option to switch the bias in qkv linear
+            proj_bias (bool): option to switch the bias in proj linear
+            rel_position (nn.Module): the relation position module
+            act_layer: nonlinear activation function
+        """
+        super(AttentionDownsample, self).__init__()
+        self.dim_k = dim_k
+        self.num_head = num_head
+        self.scale = dim_k ** -0.5
+        act_layer = nn.ReLU if act_layer is None else act_layer
+        self.q = QueryDown(dim, num_head*dim_k)
+        self.k = nn.Sequential(
+            nn.Conv2d(dim, dim_k * num_head, 1, 1, 0, bias=qkv_bias),
+            nn.BatchNorm2d(dim_k * num_head)
+        )
+        self.d = int(dim_k * att_ratio)
+        self.dh = self.num_head * self.d
+        self.v = nn.Sequential(
+            nn.Conv2d(dim, self.dh, 1, 1, 0, bias=qkv_bias),
+            nn.BatchNorm2d(self.dh)
+        )
+        self.rel_pos = rel_position if rel_position else nn.Identity()
+        self.v_local = nn.Sequential(
+            nn.Conv2d(self.dh, self.dh, 3, 1, 1, groups=self.dh),
+            nn.BatchNorm2d(self.dh)
+        )
+
+        self.talking_head1 = nn.Conv2d(num_head, num_head, 1, 1, 0)
+        self.talking_head2 = nn.Conv2d(num_head, num_head, 1, 1, 0)
+        self.proj = nn.Sequential(
+            act_layer(),
+            nn.Conv2d(self.dh, dim, 1, bias=proj_bias),
+            nn.BatchNorm2d(dim)
+        )
+
+    def forward(self, x):
+        B, C, H, W = x.size()
+        H = H // 2
+        W = W // 2
+        q = self.q(x).reshape(B, self.num_head, self.dim_k, -1).transpose(2, 3)  # B, Num_Head, N, head_dim
+        k = self.k(x).reshape(B, self.num_head, self.dim_k, -1)  # B, Num_Head, head_dim, N
+        v = self.v(x)
+        v = self.v_local(v)
+        v = v.reshape(B, self.num_head, self.d, -1).transpose(2, 3)  # B, Num_Head, N, head_dim
+        att = q @ k  # B, Num_Head, N, N
+        att = att * self.scale
+        att = self.rel_pos(att)
+        att = self.talking_head1(att)
+        att = torch.softmax(att, dim=-1)
+        att = self.talking_head2(att)
+        net = att @ v  # B, Num_Head, N, Head_Dim
+        net = net.transpose(2, 3).reshape(B, -1, H, W)
+        net = self.proj(net)
+        return net
+
+class UFFN(nn.Module):
+    def __init__(self, dim, out_dim, expansion_rate=4.,  act_layer=nn.GELU, use_mid_conv=True):
+        """
+        Unified FFN introduced at Section 3.1 in
+         "Rethinking Vision Transformers for MobileNet Size and Speed"<https://arxiv.org/abs/2212.08059>
+
+        Args:
+            dim (int):
+            out_dim (int): dimension for output
+            expansion_rate (float):  expansion rate
+            act_layer (nn.Module): nonlinear function for activation
+            use_mid_conv (bool): option to switch the middle depthwise convolution
+        """
+        super(UFFN, self).__init__()
+        if act_layer is None:
+            act_layer = nn.GELU
+        hidden_dim = int(dim*expansion_rate)
+        self.fc1 = nn.Sequential(
+            nn.Conv2d(dim, hidden_dim, 1, 1),
+            nn.BatchNorm2d(hidden_dim),
+            act_layer()
+        )
+        self.mid_conv = nn.Sequential(
+            nn.Conv2d(hidden_dim, hidden_dim, 3, 1, 1, groups=hidden_dim),
+            nn.BatchNorm2d(hidden_dim),
+            act_layer()
+        ) if use_mid_conv else nn.Identity()
+        self.fc2 = nn.Sequential(
+            nn.Conv2d(hidden_dim, out_dim, 1, 1),
+            nn.BatchNorm2d(out_dim)
+        )
+    def forward(self, x):
+        net = self.fc1(x)
+        net = self.mid_conv(net)
+        net = self.fc2(net)
+        return net
 
 if __name__ == "__main__":
-    x = torch.randn(1, 3, 224, 224).cuda()
-    model = MaxSA(3, 64, patch_size=(7, 7), grid_size=(7, 7), num_head=2, ksize=3, stride=2).cuda()
+    x = torch.randn(1, 64, 32, 32).cuda()
+    # model = MaxSA(3, 64, patch_size=(7, 7), grid_size=(7, 7), num_head=2, ksize=3, stride=2).cuda()
+    model = AttentionDownsample(8, 64, 32).cuda()
     print(model(x).shape)
 

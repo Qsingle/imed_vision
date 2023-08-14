@@ -120,7 +120,10 @@ class SegPathDataset(Dataset):
     def __getitem__(self, index):
         image_path = self.image_paths[index]
         mask_path = self.mask_paths[index]
-        image = cv2.imread(image_path)
+        # image = cv2.imread(image_path)
+        image = Image.open(image_path)
+        image = image.convert("RGB")
+        image = np.array(image)
         img_ext = os.path.splitext(image_path)[1]
         normalize = True
         if img_ext == ".npy":

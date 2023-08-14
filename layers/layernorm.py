@@ -39,7 +39,7 @@ class LayerNorm(nn.Module):
                 x = x*self.weight[None, None, :] + self.bias[None, None, :]
             return x
         else:
-            u = x.mean(1, keepdim=True)
+            u = x.mean(dim=1, keepdim=True)
             s = (x - u).pow(2).mean(1, keepdim=True)
             x = (x - u) / torch.sqrt(s + self.eps)
             x = self.weight[:, None, None] * x + self.bias[:, None, None]

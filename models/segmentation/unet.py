@@ -24,11 +24,12 @@ from layers.task_fusion import CrossGL
 __all__ = ["Unet", "NestedUNet", "AttUnet", "MiniUnet"]
 
 class Unet(nn.Module):
-    def __init__(self, in_ch, out_ch, convblock=DoubleConv, expansion=1.0,
+    def __init__(self, in_ch, out_ch, out_ch1=None, convblock=DoubleConv, expansion=1.0,
                  radix=2, drop_prob=0.0, reduction=4, norm_layer=nn.BatchNorm2d,
                  activation=nn.ReLU(inplace=True), avd=False, avd_first=False,
                  layer_attention=False, super_reso=False, upscale_rate=2, sr_layer=4,
-                 sr_seg_fusion=False, fim=False, before=True, l1=False, ss_maf=False,**kwargs):
+                 sr_seg_fusion=False, fim=False, before=True, l1=False, ss_maf=False,
+                 fa=False, **kwargs):
         """
         Unet with different block.
         References:
@@ -52,6 +53,8 @@ class Unet(nn.Module):
         """
         super(Unet, self).__init__()
         base_ch = kwargs.pop("base_ch", 64)
+        print("Input channel", in_ch)
+        out_ch1 = out_ch1 or in_ch
         self.down1 = Downsample(in_ch, base_ch, convblock=convblock, radix=radix, drop_prob=drop_prob,
                                 dilation=1, padding=1, reduction=reduction,avd=avd, avd_first=avd_first,
                                 norm_layer=norm_layer, activation=activation, expansion=expansion, **kwargs)
@@ -127,19 +130,32 @@ class Unet(nn.Module):
                 nn.Tanh(),
                 nn.Conv2d(64, 32, kernel_size=3, stride=1, padding=1, bias=False),
                 nn.Tanh(),
-                nn.Conv2d(32, (upscale_rate ** 2) * in_ch, kernel_size=3, stride=1, padding=1, bias=False),
+                nn.Conv2d(32, (upscale_rate ** 2) * out_ch1, kernel_size=3, stride=1, padding=1, bias=False),
                 nn.PixelShuffle(upscale_factor=upscale_rate)
-            )
+            ) if upscale_rate > 1 else nn.Conv2d(base_ch, out_ch1, 1, 1, 0)
             self.sr_seg_fusion = sr_seg_fusion
             self.before = before and not fim
             self.fim = fim
+            self.fa = nn.Sequential(
+                nn.Conv2d(out_ch, in_ch, 1, 1),
+                nn.BatchNorm2d(in_ch),
+                nn.ReLU()
+            ) if fa else None
+            if fa:
+                self.sssr = nn.Sequential(
+                    nn.ConvTranspose2d(out_ch, out_ch, 2, 2),
+                    nn.BatchNorm2d(out_ch),
+                    nn.ReLU()
+                )
+            else:
+                self.sssr = None
             if sr_seg_fusion:
                 # self.sr_seg_fusion_module = SpatialFusion(in_ch, out_ch)
                 if not self.before:
                     if fim:
-                        self.sr_seg_fusion_module = FIM(in_ch, out_ch)
+                        self.sr_seg_fusion_module = FIM(out_ch1, out_ch)
                     else:
-                        self.sr_seg_fusion_module = CrossGL(in_ch, out_ch, 32)
+                        self.sr_seg_fusion_module = CrossGL(out_ch1, out_ch, 32)
                 else:
                     # self.sr_seg_fusion_module = FeatureFusion(base_ch, base_ch, 32)
                     if ss_maf:
@@ -171,7 +187,10 @@ class Unet(nn.Module):
         else:
             h, w = x.size()[2:]
             if self.upsample_way == 1:
-                out = F.interpolate(out, size=(h * self.upscale_rate, w * self.upscale_rate), mode="bilinear",
+                if self.sssr is not None:
+                    out = self.sssr(out)
+                else:
+                    out = F.interpolate(out, size=(h * self.upscale_rate, w * self.upscale_rate), mode="bilinear",
                                 align_corners=True)
             elif self.upsample_way == 2:
                 out = self.out_up(out)
@@ -204,16 +223,20 @@ class Unet(nn.Module):
                     out = self.out_up(out)
                 if self.before:
                     fusion_sr, fusion_seg = self.sr_seg_fusion_module(sr_up9, up9)
+                    fusion_sr = self.sr_module(fusion_sr)
+                    fusion_seg = self.out_conv(fusion_seg)
                     h, w = x.size()[2:]
-                    if self.upsample_way == 1:
-                        fusion_seg = F.interpolate(fusion_seg, size=(h * self.upscale_rate, w * self.upscale_rate), mode="bilinear",
-                                            align_corners=True)
-                    elif self.upsample_way == 2:
+
+                    if self.upsample_way == 2:
                         fusion_seg = self.out_up(fusion_seg)
+                    else:
+                        fusion_seg = F.interpolate(fusion_seg, size=(h * self.upscale_rate, w * self.upscale_rate),
+                                                   mode="bilinear",
+                                                   align_corners=True)
                 else:
                     if self.fim:
                         fusion_attention = self.sr_seg_fusion_module(sr, out)
-                        fusion_seg = fusion_attention*out
+                        fusion_seg = fusion_attention*out + out
                     else:
                         fusion_sr, fusion_seg = self.sr_seg_fusion_module(sr, out)
                     # fusion_seg = fusion_seg*out + out
@@ -227,6 +250,9 @@ class Unet(nn.Module):
                 l1_loss = nn.functional.l1_loss
                 l1 = l1_loss(sr_up6, up6) + l1_loss(sr_up7, up7) + l1_loss(sr_up8, up8) + l1_loss(sr_up9, up9)
                 return out, sr, l1
+            if self.fa is not None:
+                fa = self.fa(out)
+                return out, sr, fa
             if self.sr_seg_fusion:
                 return out, sr, fusion_seg, fusion_sr
             return out, sr
@@ -511,34 +537,74 @@ class AttUnet(nn.Module):
         out = self.out_conv(up9)
         return out
 
-
-
-
 class UNet3D(nn.Module):
-    def __init__(self, in_ch=1, num_classes=7):
+    def __init__(self, in_ch=1, num_classes=7, super_reso=False, fusion=False, upscale_rate=2, max_ch=320):
         super(UNet3D, self).__init__()
-        self.modal1_down1 = Downsample3D(in_ch, 64)
-        self.modal1_down2 = Downsample3D(64, 128)
-        self.modal1_down3 = Downsample3D(128, 256)
-        self.modal1_down4 = DoubleConv3D(256, 512)
-        self.up5 = Upsample3D(256, 512, 256)
-        self.up6 = Upsample3D(128, 256, 128)
-        self.up7 = Upsample3D(64, 128, 64)
+        base_ch = 32
+        self.modal1_down1 = Downsample3D(in_ch, base_ch, reduction=2)
+        self.modal1_down2 = Downsample3D(base_ch, base_ch*2, reduction=2)
+        self.modal1_down3 = Downsample3D(base_ch*2, base_ch*4, reduction=2)
+        ch = min(base_ch*8, max_ch)
+        self.modal1_down4 = Downsample3D(base_ch*4, ch, reduction=2)
+        ch1 = min(base_ch*16, max_ch)
+        self.modal1_down5 = DoubleConv3D(ch, ch1, reduction=2)
+        self.up5 = Upsample3D(ch, ch1, ch)
+        self.up6 = Upsample3D(base_ch*4, ch, base_ch*4)
+        self.up7 = Upsample3D(base_ch*2, base_ch*4, base_ch*2)
+        self.up8 = Upsample3D(base_ch, base_ch*2, base_ch)
 
         self.out_conv = nn.Conv3d(
-            64, num_classes, 1, 1
+            base_ch, num_classes, 1, 1
         )
+        self.super_reso = super_reso
+        if self.super_reso:
+            self.upscale_rate = upscale_rate
+            from layers.superpixel import PixelShuffle3d
+            from layers.task_fusion import CrossGL3D
+            self.sr_up5 = Upsample3D(ch, ch1, ch)
+            self.sr_up6 = Upsample3D(base_ch*4, ch, base_ch*4)
+            self.sr_up7 = Upsample3D(base_ch*2, base_ch*4, base_ch*2)
+            self.sr_up8 = Upsample3D(base_ch, base_ch*2, base_ch)
+            self.sr_conv = nn.Sequential(
+                nn.Conv3d(base_ch, (upscale_rate ** 3) * in_ch, kernel_size=3, stride=1, padding=1),
+                nn.ReLU()
+            )
+
+            self.sr_module = PixelShuffle3d(scale=upscale_rate)
+            self.fusion = fusion
+            if fusion:
+                self.seg_sr_fusion = CrossGL3D(base_ch, base_ch)
 
     def forward(self, x):
         modal1_1, down = self.modal1_down1(x)
         modal1_2, down = self.modal1_down2(down)
         modal1_3, down = self.modal1_down3(down)
-        modal1_4 = self.modal1_down4(down)
+        modal1_4, down = self.modal1_down4(down)
+        modal1_5 = self.modal1_down5(down)
 
-        up5 = self.up5(modal1_3, modal1_4)
-        up6 = self.up6(modal1_2, up5)
-        up7 = self.up7(modal1_1, up6)
-        out = self.out_conv(up7)
+        up5 = self.up5(modal1_4, modal1_5)
+        up6 = self.up6(modal1_3, up5)
+        up7 = self.up7(modal1_2, up6)
+        up8 = self.up8(modal1_1, up7)
+        out = self.out_conv(up8)
+        if self.super_reso:
+            out = F.interpolate(out, scale_factor=self.upscale_rate, mode="trilinear", align_corners=True)
+            if self.training:
+                sr_up5 = self.sr_up5(modal1_4, modal1_5)
+                sr_up6 = self.sr_up6(modal1_3, sr_up5)
+                sr_up7 = self.sr_up7(modal1_2, sr_up6)
+                sr_up8 = self.sr_up8(modal1_1, sr_up7)
+                sr = self.sr_conv(sr_up8)
+                sr = self.sr_module(sr)
+                fusion_seg = None
+                fusion_sr = None
+                if self.fusion:
+                    fusion_sr, fusion_seg = self.seg_sr_fusion(sr_up8, up8)
+                    fusion_sr = self.sr_conv(fusion_sr)
+                    fusion_sr = self.sr_module(fusion_sr)
+                    fusion_seg = self.out_conv(fusion_seg)
+                    fusion_seg = F.interpolate(fusion_seg, scale_factor=self.upscale_rate, mode="trilinear", align_corners=True)
+                return out, sr, fusion_sr, fusion_seg
         return out
 
 

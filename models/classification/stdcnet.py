@@ -32,6 +32,7 @@ class STDCNet(nn.Module):
         self.conv1 = ConvX(in_ch, 32, 3, 2, 1)
         self.conv2 = ConvX(32, 64, 3, 2, 1)
         self.ch = 64
+        self.fe_chs = []
         self.stage3 = self._make_layers(layers[0], 256)
         self.stage4 = self._make_layers(layers[1], 512)
         self.stage5 = self._make_layers(layers[2], 1024)
@@ -52,6 +53,7 @@ class STDCNet(nn.Module):
                 self.ch = out_ch
             else:
                 blocks.append(STDC(self.ch, self.ch))
+        self.fe_chs.append(self.ch)
         return nn.Sequential(*blocks)
 
     def forward_features(self, x):

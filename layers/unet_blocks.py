@@ -18,8 +18,10 @@ try:
 except:
     from .layernorm import LayerNorm
 
-__all__ = ["DoubleConv3D", "Downsample3D", "Upsample3D", "AttentionBlock", "VGGBlock", "Upsample",
+__all__ = ["DoubleConv3D", "Downsample3D", "ResidualDoubleConv3D", "Upsample3D", "AttentionBlock", "VGGBlock", "Upsample",
            "DoubleConv", "Downsample", "SplAtBlock", "RRBlock", "ResBlock", "ConvNeXtBlock"]
+
+
 
 class DoubleConv3D(nn.Module):
     def __init__(self, in_ch, out_ch, reduction=1):
@@ -27,21 +29,51 @@ class DoubleConv3D(nn.Module):
         hidden_ch = out_ch // reduction
         self.conv = nn.Sequential(
             nn.Conv3d(in_ch, hidden_ch, kernel_size=3, stride=1, padding=1),
-            nn.BatchNorm3d(hidden_ch),
-            nn.ReLU(inplace=True),
+            nn.InstanceNorm3d(hidden_ch),
+            nn.LeakyReLU(inplace=True),
             nn.Conv3d(hidden_ch, out_ch, kernel_size=3, stride=1, padding=1),
-            nn.BatchNorm3d(out_ch),
-            nn.ReLU(inplace=True)
+            nn.InstanceNorm3d(out_ch),
+            nn.LeakyReLU(inplace=True)
         )
 
     def forward(self, x):
         return self.conv(x)
 
+class ResidualDoubleConv3D(nn.Module):
+    def __init__(self, in_ch, out_ch, reduction=1):
+        super().__init__()
+        hidden_ch = out_ch // reduction
+        self.conv = nn.Sequential(
+            nn.Conv3d(in_ch, hidden_ch, kernel_size=3, stride=1, padding=1),
+            nn.InstanceNorm3d(hidden_ch),
+            nn.LeakyReLU(inplace=True),
+            nn.Conv3d(hidden_ch, out_ch, kernel_size=3, stride=1, padding=1),
+            nn.InstanceNorm3d(out_ch)
+        )
+        self.residual = nn.Sequential(
+            nn.Conv3d(in_ch, out_ch, 1, 1),
+            nn.InstanceNorm3d(out_ch)
+        )
+        self.relu = nn.LeakyReLU()
+    
+    def forward(self, x):
+        net = self.conv(x)
+        net = net + self.residual(x)
+        net = self.relu(net)
+        return net
+
 class Downsample3D(nn.Module):
-    def __init__(self, in_ch, out_ch):
+    def __init__(self, in_ch, out_ch, conv_op=DoubleConv3D, reduction=1, pool="max"):
         super(Downsample3D, self).__init__()
-        self.conv = DoubleConv3D(in_ch, out_ch, reduction=2)
-        self.down = nn.MaxPool3d(3, stride=2, padding=1)
+        self.conv = conv_op(in_ch, out_ch, reduction=reduction)
+        if pool == "max":
+            self.down = nn.MaxPool3d(3, stride=2, padding=1)
+        elif pool == "avg":
+            self.down = nn.AvgPool3d(3, stride=1, padding=1)
+        elif pool == "conv":
+            self.down = nn.Conv3d(out_ch, out_ch, 3, 2, 1)
+        else:
+            raise ValueError("Unknown downsample way:{}".format(pool))
 
     def forward(self, x):
         net = self.conv(x)
@@ -49,13 +81,35 @@ class Downsample3D(nn.Module):
         return net, down
 
 class Upsample3D(nn.Module):
-    def __init__(self, in_ch1, in_ch2, out_ch):
+    def __init__(self, in_ch1, in_ch2, out_ch, conv_op=DoubleConv3D,reduction=1, mode="trilinear"):
         super(Upsample3D, self).__init__()
-        self.conv = DoubleConv3D(in_ch1+in_ch2, out_ch)
+        self.conv = conv_op(in_ch1+in_ch2, out_ch, reduction=reduction)
+        self.mode = mode
+        # self.up_conv = nn.Conv3d(in_ch2, in_ch2, 1, 1)
+        self.up_conv = nn.Sequential(
+            nn.Conv3d(in_ch2, in_ch2, 1, 1),
+            # nn.ConvTranspose3d(in_ch2, in_ch2, 2, 2), 
+            nn.LeakyReLU()
+        )
 
 
     def forward(self, x1, x2):
-        up = F.interpolate(x2, x1.size()[2:], mode="trilinear", align_corners=True)
+        up = F.interpolate(x2, x1.size()[2:], mode=self.mode)
+        up = self.up_conv(up)
+        net = torch.cat([x1, up], dim=1)
+        net = self.conv(net)
+        return net
+
+class TransposeUpsample3D(Upsample3D):
+    def __init__(self, in_ch1, in_ch2, out_ch, conv_op=DoubleConv3D, reduction=1):
+        super().__init__(in_ch1, in_ch2, out_ch, conv_op, reduction)
+        self.up_conv = nn.Sequential(
+            nn.ConvTranspose3d(in_ch2, in_ch2, 4, 2, padding=1, output_padding=0),
+            nn.LeakyReLU() 
+        )
+    
+    def forward(self, x1, x2):
+        up = self.up_conv(x2)
         net = torch.cat([x1, up], dim=1)
         net = self.conv(net)
         return net

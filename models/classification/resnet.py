@@ -30,15 +30,15 @@ __all__ = ['ResNet', 'resnet18', 'resnet34', 'resnet50', 'resnet101',
            ]
 
 model_urls = {
-    'resnet18': 'https://download.pytorch.org/models/resnet18-f37072fd.pth',
-    'resnet34': 'https://download.pytorch.org/models/resnet34-b627a593.pth',
-    'resnet50': 'https://download.pytorch.org/models/resnet50-0676ba61.pth',
-    'resnet101': 'https://download.pytorch.org/models/resnet101-63fe2227.pth',
-    'resnet152': 'https://download.pytorch.org/models/resnet152-394f9c45.pth',
-    'resnext50_32x4d': 'https://download.pytorch.org/models/resnext50_32x4d-7cdf4587.pth',
-    'resnext101_32x8d': 'https://download.pytorch.org/models/resnext101_32x8d-8ba56ff5.pth',
-    'wide_resnet50_2': 'https://download.pytorch.org/models/wide_resnet50_2-95faca4d.pth',
-    'wide_resnet101_2': 'https://download.pytorch.org/models/wide_resnet101_2-32ee1156.pth',
+    'resnet18': 'https://github.com/Qsingle/imed_vision/releases/download/V0.2/resnet18.pth',
+    'resnet34': 'https://github.com/Qsingle/imed_vision/releases/download/V0.2/resnet34.pth',
+    'resnet50': 'https://github.com/Qsingle/imed_vision/releases/download/V0.2/resnet50.pth',
+    'resnet101': 'https://github.com/Qsingle/imed_vision/releases/download/V0.2/resnet101.pth',
+    'resnet152': 'https://github.com/Qsingle/imed_vision/releases/download/V0.2/resnet152.pth',
+    'resnext50_32x4d': 'https://github.com/Qsingle/imed_vision/releases/download/V0.2/resnext50_32x4d.pth',
+    'resnext101_32x8d': 'https://github.com/Qsingle/imed_vision/releases/download/V0.2/resnext101_32x8d.pth',
+    'wide_resnet50_2': 'https://github.com/Qsingle/imed_vision/releases/download/V0.2/wide_resnet50_2.pth',
+    'wide_resnet101_2': 'https://github.com/Qsingle/imed_vision/releases/download/V0.2/wide_resnet101_2.pth',
     'seresnet18': '',
     'seresnet34': '',
     'seresnet50': '',
@@ -46,12 +46,12 @@ model_urls = {
     'seresnet152': '',
     'seresnext50_32x4d': '',
     'seresnext101_32x8d': '',
-    'resnest50': 'https://github.com/rwightman/pytorch-image-models/releases/download/v0.1-resnest/resnest50-528c19ca.pth',
-    'resnest101': 'https://github.com/rwightman/pytorch-image-models/releases/download/v0.1-resnest/resnest101-22405ba7.pth',
-    'resnest200': 'https://github.com/rwightman/pytorch-image-models/releases/download/v0.1-resnest/resnest200-75117900.pth',
-    'resnest269': 'https://github.com/rwightman/pytorch-image-models/releases/download/v0.1-resnest/resnest269-0cc87c48.pth',
-    'resnest14': 'https://github.com/rwightman/pytorch-image-models/releases/download/v0.1-weights/gluon_resnest14-9c8fe254.pth',
-    'resnest26': 'https://github.com/rwightman/pytorch-image-models/releases/download/v0.1-weights/gluon_resnest26-50eb607c.pth'
+    'resnest50': 'https://github.com/Qsingle/imed_vision/releases/download/V0.2/resnest50.pth',
+    'resnest101': 'https://github.com/Qsingle/imed_vision/releases/download/V0.2/resnest101.pth',
+    'resnest200': 'https://github.com/Qsingle/imed_vision/releases/download/V0.2/resnest200.pth',
+    'resnest269': 'https://github.com/Qsingle/imed_vision/releases/download/V0.2/resnest269.pth',
+    'resnest14': 'https://github.com/Qsingle/imed_vision/releases/download/V0.2/resnest14.pth',
+    'resnest26': 'https://github.com/Qsingle/imed_vision/releases/download/V0.2/resnest26.pth'
 }
 
 
@@ -328,6 +328,7 @@ class ResNet(nn.Module):
         self.avg_layer = avg_layer
         self.base_width = width_per_group
         self.multi_grids = multi_grids
+        self.fe_chs = []
         # entry part
         self.light_head = light_head
         if light_head:
@@ -444,6 +445,7 @@ class ResNet(nn.Module):
                                 norm_layer=norm_layer, activation=activation, zero_bn_init=zero_init_bn, radix=radix,
                                 avd=avd, avd_first=avd_first, dropout_rate=dropout_rate,
                                 reduction=reduction, semodule=semodule, drop_path_rate=drop_path_rate))
+        self.fe_chs.append(self.inplanes)
         return nn.Sequential(*layers)
 
     def _make_grid_layer(self, block, planes, blocks, stride, dilation=1, semodule=None, avd=False,
@@ -506,6 +508,7 @@ class ResNet(nn.Module):
                       norm_layer=norm_layer, activation=activation, zero_bn_init=zero_init_bn,
                       radix=radix, avd=avd, avd_first=avd_first, dropout_rate=dropout_rate,
                       reduction=reduction, semodule=semodule, drop_path_rate=drop_path_rate))
+        self.fe_chs.append(self.inplanes)
         return nn.Sequential(*layers)
 
     def forward_features(self, x):
@@ -535,74 +538,6 @@ class ResNet(nn.Module):
         net = self.avg_pool(features[-1])
         net = self.fc(net)
         return net
-
-    def load_state_dict(self, state_dict: 'OrderedDict[str, Tensor]',
-                        strict: bool = True):
-        new_state_dict = OrderedDict()
-
-        try:
-            super(ResNet, self).load_state_dict(state_dict, strict=strict)
-        except:
-            for key in state_dict.keys():
-                match = re.match("bn?([1])\.?(.*)", key)
-                if match is not None:
-                    groups = match.groups()
-                    new_key = "conv" + groups[0] + "." + "norm_layer." + groups[1]
-                    if self.light_head:
-                        new_key = "conv" + groups[0] + ".2.norm_layer." + groups[1]
-                    new_state_dict[new_key] = state_dict[key]
-                match = re.match("conv?([0-9]).([0-9]{0,1})\.?(.*)", key)
-                if match is not None:
-                    groups = match.groups()
-                    new_key = "conv" + groups[0] + ".conv." + groups[1]
-                    if len(groups) == 3:
-                        map_d = {"0": "0", "3": "1", "6": "2"}
-                        if groups[1] in ["0", "3", "6"]:
-                            new_key = "conv" + groups[0] + "." + map_d[groups[1]] + ".conv." + groups[2]
-                        if groups[1] in ["1", "4"]:
-                            map_d = {"1": "0", "4": "1"}
-                            new_key = "conv" + groups[0] + "." + map_d[groups[1]] + ".norm_layer." + groups[2]
-                    new_state_dict[new_key] = state_dict[key]
-                match = re.match("(layer[1-4].[0-9]{1,3}).bn([0-9])\.?(.*)", key)
-                if match is not None:
-                    groups = match.groups()
-                    # print(groups)
-                    new_key = groups[0] + ".conv" + groups[1] + ".norm_layer." + groups[2]
-                    new_state_dict[new_key] = state_dict[key]
-                match = re.match("(layer[1-4].[0-9]{1,3}).conv([0-9])\.?(.*)", key)
-                if match is not None:
-                    groups = match.groups()
-                    new_key = groups[0] + ".conv" + groups[1] + ".conv." + groups[2]
-                    if "conv" in groups[2] or "bn" in groups[2] or "fc" in groups[2]:
-                        new_key = groups[0] + ".conv" + groups[1] + "." + groups[2]
-                    # print(key)
-                    new_state_dict[new_key] = state_dict[key]
-                match = re.match("(layer[1-4].[0-9].downsample)\.([0-9])\\.?(.*)", key)
-                if match is not None:
-                    groups = match.groups()
-                    if groups[1] == "0":
-                        new_key = groups[0] + ".0.conv." + groups[2]
-                    elif groups[1] == "1" or groups[1] == "2":
-                        new_key = groups[0] + ".0.norm_layer." + groups[2]
-                        if self.avg_down:
-                            if groups[1] != "1":
-                                new_key = groups[0] + ".1.norm_layer." + groups[2]
-                            else:
-                                new_key = groups[0] + ".1.conv." + groups[2]
-                    else:
-                        raise ValueError("Unknown key:{}".format(key))
-                    new_state_dict[new_key] = state_dict[key]
-
-                match = re.match("fc\.?(.*)", key)
-                if match is not None:
-                    groups = match.groups()
-                    new_key = "fc.1." + groups[0]
-                    new_state_dict[new_key] = state_dict[key]
-            try:
-                super(ResNet, self).load_state_dict(new_state_dict, strict=strict)
-            except Exception as e:
-                self.state_dict().update(new_state_dict)
-
 
 def _resnet(arch, block, blocks, pretrained=False, progress=True, **kwargs):
     '''
@@ -705,7 +640,7 @@ def wide_resnet50_2(pretrained=False, progress=True, **kwargs):
         progress (bool): If True, displays a progress bar of the download to stderr
     """
     kwargs["width_per_group"] = 64 * 2
-    return _resnet("wide_resnet_50_2", Bottleneck, get_layers(50), pretrained, progress, **kwargs)
+    return _resnet("wide_resnet50_2", Bottleneck, get_layers(50), pretrained, progress, **kwargs)
 
 @BACKBONE_REGISTER.register()
 def wide_resnet101_2(pretrained=False, progress=True, **kwargs):
@@ -717,7 +652,7 @@ def wide_resnet101_2(pretrained=False, progress=True, **kwargs):
         progress (bool): If True, displays a progress bar of the download to stderr
     """
     kwargs["width_per_group"] = 64 * 2
-    return _resnet("wide_resnet_101_2", Bottleneck, get_layers(101), pretrained, progress, **kwargs)
+    return _resnet("wide_resnet101_2", Bottleneck, get_layers(101), pretrained, progress, **kwargs)
 
 @BACKBONE_REGISTER.register()
 def seresnet18(pretrained=False, progress=True, **kwargs):
@@ -912,7 +847,7 @@ def resnest269(pretrained=False, progress=True, **kwargs):
 
 
 if __name__ == "__main__":
-    model = resnet18(pretrained=False)
+    model = resnet152(pretrained=True)
     x = torch.randn((1, 3, 224, 224))
     device = torch.device("cpu")
     model.eval()

@@ -51,3 +51,38 @@ class PolyLRScheduler(LRScheduler):
                 )
             tmp_state[key] = state_dict[key]
         self.__dict__.update(tmp_state)
+
+class MMCVPoly(PolyLRScheduler):
+    def __init__(self, optimizer,  num_images, batch_size, epochs, gamma=0.9, start=-1, drop_last=False, eta_min=1e-6):
+        super(MMCVPoly, self).__init__(optimizer, num_images, batch_size, epochs, gamma, start, drop_last)
+        self.eta_min = eta_min
+
+    def get_lr(self):
+        def calc_lr(group):
+            if self.current_step == 0:
+                return group['initial_lr']
+            lr = (group["initial_lr"] - self.eta_min) * (1-1/(self.total_iterations
+                                                              - self.current_step + 1))**self.gamma + self.eta_min
+            return lr
+        return [calc_lr(group) for group in self.optimizer.param_groups]
+
+    def state_dict(self):
+        return {
+            key: value
+            for key, value in self.__dict__.items()
+            if key in ["total_iterations", "gamma", "current_step",
+                       "batch_size", "num_images", "epochs", "eta_min"]
+        }
+
+    def load_state_dict(self, state_dict):
+        tmp_state = {}
+        keys = ["total_iterations", "gamma", "current_step",
+                       "batch_size", "num_images", "epochs", "eta_min"]
+        for key in keys:
+            if key not in state_dict:
+                raise KeyError(
+                    "key '{}'' is not specified in "
+                    "state_dict when loading state dict".format(key)
+                )
+            tmp_state[key] = state_dict[key]
+        self.__dict__.update(tmp_state)

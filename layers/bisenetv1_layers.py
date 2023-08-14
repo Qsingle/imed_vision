@@ -15,6 +15,8 @@ import torch.nn as nn
 
 from .utils import Conv2d
 
+__all__ = ["ARM", "FFM"]
+
 class ARM(nn.Module):
     def __init__(self, in_ch, out_ch):
         """

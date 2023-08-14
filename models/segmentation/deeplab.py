@@ -15,6 +15,7 @@ import torch.nn.functional as F
 from models.classification import create_backbone
 from layers.utils import *
 from layers.task_fusion import CrossGL
+from layers.task_fusion import CrossTaskAttention
 
 __all__ = ["DeeplabV3", "DeeplabV3Plus", "ASPP", "ImagePooling"]
 
@@ -165,10 +166,11 @@ class Decoder(nn.Module):
         return fusion_out
 
 class DeeplabV3Plus(nn.Module):
-    def __init__(self, in_ch, num_classes, backbone="resnet50",  output_stride=16,
-                 middle_layer=False, super_reso=False, upscale_rate=2, sr_seg_fusion=False,
+    def __init__(self, in_ch, num_classes, sr_ch=None, backbone="resnet50",  output_stride=16,
+                 middle_layer=False, super_reso=False, upscale_rate=2, sr_seg_fusion=False, cross_att=False, both=False,
                  **kwargs):
         super(DeeplabV3Plus,self).__init__()
+        sr_ch = in_ch if sr_ch is None else sr_ch
         if output_stride == 16:
             strides = [1, 2, 2, 1]
             dilations = [1, 1, 1, 2]
@@ -183,6 +185,7 @@ class DeeplabV3Plus(nn.Module):
         multi_grids = [1, 2, 4]
         # self.backbone = backbones[backbone](in_ch=in_ch, strides=strides,
         #                                     dilations=dilations, multi_grids=multi_grids, **kwargs)
+        self.both = both
         self.backbone = create_backbone(backbone, in_ch=in_ch, strides=strides,
                                             dilations=dilations, multi_grids=multi_grids, **kwargs)
         try:
@@ -221,9 +224,12 @@ class DeeplabV3Plus(nn.Module):
                 nn.Tanh(),
                 nn.Conv2d(32, (upscale_rate ** 2) * in_ch, kernel_size=3, stride=1, padding=1, bias=False),
                 nn.PixelShuffle(upscale_factor=upscale_rate)
-            )
+            ) if sr_ch == 3 else nn.Conv2d(256, sr_ch, 1, 1)
             if self.sr_seg_fusion:
-                self.sr_seg_fusion_module = CrossGL(256, 256)
+                if cross_att:
+                    self.sr_seg_fusion_module = CrossTaskAttention(256, 256, patch_size=16)
+                else:
+                    self.sr_seg_fusion_module = CrossGL(256, 256)
 
 
     def forward(self, x):
@@ -250,7 +256,7 @@ class DeeplabV3Plus(nn.Module):
         fusion_seg = None
         if self.super_reso:
             seg_out = F.interpolate(seg_out, scale_factor=self.upscale_rate, align_corners=False, mode="bilinear")
-            if self.training:
+            if self.training or self.both:
                 sr_fe = self.decoder_sr(h, aspp)
                 if self.sr_seg_fusion:
                     fusion_sr, fusion_seg = self.sr_seg_fusion_module(sr_fe, net)
@@ -265,6 +271,8 @@ class DeeplabV3Plus(nn.Module):
             if self.super_reso and self.training:
                 if self.sr_seg_fusion:
                     return seg_out, sr, fusion_seg, fusion_sr
+                return seg_out, sr
+            elif self.super_reso and self.both:
                 return seg_out, sr
         return seg_out
 

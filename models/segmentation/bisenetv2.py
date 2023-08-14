@@ -15,7 +15,7 @@ import os
 import torch.nn as nn
 import torch.nn.functional as F
 
-from layers.bisnetv2_layers import *
+from layers.bisenetv2_layers import *
 
 
 class BiseNetV2(nn.Module):

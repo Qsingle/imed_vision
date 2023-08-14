@@ -79,7 +79,7 @@ class MixTransformer(nn.Module):
                                      for i in range(depths[3])])
         self.norm4 = norm_layer(embed_dims[3])
         cur += depths[3]
-
+        self.fe_chs = embed_dims
         #classification head
         self.head = nn.Linear(embed_dims[3], num_classes)
         self.global_pool = global_pool
