@@ -251,7 +251,8 @@ class DPT(nn.Module):
         self.sam = False
         assert arch in supported_arch, "We only support visual transformer architechture now, excepht in {}, but got {}".format(supported_arch, arch)
         if arch.startswith("sam"):
-            self.encoder = sam_build_func[arch](checkpoint=checkpoint).image_encoder
+            self.encoder = sam_build_func[arch](checkpoint=None).image_encoder
+            self.reset_backbone(checkpoint, key=None)
             for param in self.encoder.parameters():
                 param.requires_grad = False
             self.sam = True

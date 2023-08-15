@@ -19,3 +19,5 @@ from .patch_embd import *
 from .psp import PSP
 from .axialatt import AxialAttention
 from .superpixel import SuperResolutionModule, PixelShuffle3d
+from .adapter import *
+from .prompt import *

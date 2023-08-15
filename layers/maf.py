@@ -15,8 +15,8 @@ class SSC(nn.Module):
         """
 
         Args:
-            in_ch:
-            groups:
+            in_ch (int): number of channels for input
+            groups (int, Optional): Number of groups, Defatults to 4.
         """
         super(SSC, self).__init__()
         assert in_ch % groups == 0
