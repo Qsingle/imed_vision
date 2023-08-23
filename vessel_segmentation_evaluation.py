@@ -18,7 +18,7 @@ import tqdm
 import cv2
 import pandas as pd
 from torcheval.metrics.classification.precision_recall_curve import BinaryPrecisionRecallCurve
-from sklearn.metrics import auc
+from sklearn.metrics import precision_recall_curve, auc
 from torch.nn.functional import one_hot
 
 from datasets.vessel_segmentation import get_paths
@@ -35,6 +35,7 @@ from models.segmentation.scsnet import SCSNet
 from models.segmentation.denseunet import Dense_Unet
 from models.segmentation.dedcgcnee import DEDCGCNEE
 from models.super_resolution import ESPCN
+from models.segmentation.dpt import DPT
 
 
 def main(config):
@@ -50,10 +51,10 @@ def main(config):
     model_name = config["model_name"]
     block_name = config["block_name"]
     gpu_index = config["gpu_index"]
+    os.environ["CUDA_VISIBLE_DEVICES"] = gpu_index
     channel = config["channel"]
     upscale_rate = config["upscale_rate"]
     weights = config["weights"]
-    os.environ["CUDA_VISIBLE_DEVICES"] = gpu_index
     dataset = config["dataset"]
     output_dir = config["output_dir"]
     sr_preprocess = config["sr_preprocess"]
@@ -122,6 +123,16 @@ def main(config):
         model = Unet(channel, num_classes, sr_layer=5, before=True, sr_seg_fusion=True, ss_maf=True,
                      upscale_rate=upscale_rate, super_reso=True)
         super_reso = True
+    elif model_name == "dpt":
+        img_size = real = 1024
+        if "dinov2" in block_name:
+            img_size = 518
+            p_size = 1024 // 14
+            real = p_size*14
+        print("Eval at size {}x{}".format(real, real))
+        image_size = [real, real]
+        model = DPT(arch=block_name, img_size=img_size, real_img_size=real, task="seg", out_dim=num_classes, checkpoint=None)
+        model_name = model_name + "_" + block_name
     else:
         raise ValueError("Unknown model name {}".format(model_name))
     if sr_preprocess:
@@ -168,6 +179,7 @@ def main(config):
         for image_path, mask_path in bar:
             filename = os.path.basename(image_path)
             image = cv2.imread(image_path)
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
             mask = cv2.imread(mask_path, 0)
             # mask = mask.convert("L")
             if divide:
@@ -254,45 +266,31 @@ def main(config):
         for i in range(1, num_classes):
             m = torch.where(masks == i, 1, 0).flatten()
             p = preds[:, i, :, :].flatten()
-            prcs[i-1].update(p, m)
+            prcs[i - 1].update(p, m)
             precision, recall, _ = prcs[i-1].compute()
-            precision = precision.detach().cpu().numpy()
-            recall = recall.detach().cpu().numpy()
-            aucs.append(auc(recall, precision))
+            # precision, recall, thresholds = precision_recall_curve(m.detach().cpu().numpy(), p.detach().cpu().numpy())
+            pr_auc = auc(recall, precision)
+            aucs.append(pr_auc)
         print("auc:", aucs)
         print("mean auc:", np.nanmean(aucs))
-    if not os.path.exists(os.path.join(os.path.dirname(output_dir), "mean_results.csv")):
-        with open(os.path.join(os.path.dirname(output_dir), "mean_results.csv"), "w", encoding="utf-8") as f:
-            results = []
-            for met in show_metric:
-                if num_classes <=2:
-                    results.append(result[met][1].item())
-                else:
-                    results.append(np.nanmean(result[met][1:].cpu().numpy()))
-            f.write(",".join([str(s) for s in results]))
-            f.write("\n")
-    else:
-        with open(os.path.join(os.path.dirname(output_dir), "mean_results.csv"), "a", encoding="utf-8") as f:
-            results = []
-            for met in show_metric:
-                if num_classes <=2:
-                    results.append(result[met][1].item())
-                else:
-                    results.append(np.nanmean(result[met][1:].cpu().numpy()))
-            f.write(",".join([str(s) for s in results]))
-            f.write("\n")
-    all_results = {}
-    for k in result.keys():
-        met = result[k]
-        all_results[k] = {}
-        for c in range(len(met)):
-            all_results[k][str(c)] = met[c].item()
-    pd.DataFrame(all_results).to_excel(os.path.join(output_dir, "results.xlsx"), encoding="utf-8")
+        result['aucs'] = aucs
+    return result
+    # all_results = {}
+    # for k in result.keys():
+    #     met = result[k]
+    #     all_results[k] = {}
+    #     for c in range(len(met)):
+    #         all_results[k][str(c)] = met[c].item()
+    # pd.DataFrame(all_results).to_excel(os.path.join(output_dir, "results.xlsx"), encoding="utf-8")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser("Vessel segmentation evaluation")
     parser.add_argument("--config_path", type=str, default="configs/vessel_segmentation_test.json",
                         help="path to the config file")
+    parser.add_argument("--focal", action="store_true", default=False,
+                        help="whether use focal loss")
+    parser.add_argument("--cbce", action="store_true", default=False,
+                        help="whether use cbce loss")
     args = parser.parse_args()
     with open(args.config_path) as f:
         config = json.load(f)
@@ -301,6 +299,16 @@ if __name__ == "__main__":
     super_reso = config["super_reso"]
     model_name = config["model_name"]
     fusion = config["fusion"]
+    need_results = {
+        "precision":[],
+        "acc": [],
+        "dice": [],
+        "specifity": [],
+        "iou": [],
+        "recall": [],
+        "mcc": [],
+        "bm": []
+    }
     for i in range(5):
         config["image_size"] = [image_size[0] // upscale_rate, image_size[1] // upscale_rate]
         if super_reso:
@@ -313,7 +321,11 @@ if __name__ == "__main__":
                 mid += "after"
         else:
             mid = ""
-        sub_name = model_name if model_name != "unet" else model_name+"_"+config["block_name"]
+        if args.focal:
+            mid += "_focal"
+        elif args.cbce:
+            mid += "_cbce"
+        sub_name = model_name if model_name != "unet" and model_name.lower() != "dpt" else model_name+"_"+config["block_name"]
         config["weights"] = os.path.join("ckpt", config["dataset"],
                                           model_name + "_" + "_".join([str(s) for s in config["image_size"]]) + mid,
                                           str(i), sub_name,
@@ -321,4 +333,19 @@ if __name__ == "__main__":
         config["output_dir"] = os.path.join("output", config["dataset"], model_name+"_"+"_".join([str(s) for s in config["image_size"]]) + mid,
                                             str(i))
         print(config["weights"])
-        main(config)
+        result = main(config)
+        for key in need_results.keys():
+            if not ("auc" in key):
+                need_results[key].append(
+                    np.nanmean(result[key][1:].detach().cpu().numpy())
+                )
+        if config['dataset'] == "ddr" or config["dataset"] == "idrid":
+            for i in range(1, config['num_classes']):
+                k = "auc_{}".format(i)
+                if k in need_results:
+                    need_results[k].append(result['aucs'][i - 1])
+                else:
+                    need_results[k] = [result['aucs'][i-1]]
+
+    outpu_dir = os.path.join("output", config["dataset"], model_name+"_"+"_".join([str(s) for s in config["image_size"]]) + mid)
+    pd.DataFrame(need_results).to_excel(os.path.join(outpu_dir, "results.xlsx"), index=False)

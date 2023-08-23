@@ -42,11 +42,13 @@ from comm.metrics import Metric
 from models.segmentation.denseunet import Dense_Unet
 from models.segmentation.dedcgcnee import DEDCGCNEE
 from models.segmentation import DualLearning
+from models.segmentation.dpt import DPT
 from loss import RMILoss
 from loss import SSIMLoss
 from loss import CBCE
 from loss import DetailLoss
 from loss import DiceLoss
+from loss import FocalLoss
 from loss.distance_loss import DisPenalizedCE
 
 
@@ -221,6 +223,16 @@ def main_worker(gpu, ngpus_per_node, args, config):
         model = DualLearning(channel, num_classes, arch=config["block_name"],
                              upscale_rate=upscale_rate, pretrained=config["pretrain"])
         super_reso = True
+    elif model_name == "dpt":
+        img_size = real = 1024
+        if "dinov2" in block_name:
+            img_size = 518
+            p_size = 1024 // 14
+            real = p_size*14
+        print("train at size {}x{}".format(real, real))
+        image_size = real
+        model = DPT(arch=block_name, img_size=img_size, real_img_size=real, task="seg", out_dim=num_classes, checkpoint=config["pretrained"])
+        model_name = model_name + "_" + block_name
     elif model_name.lower() == "ss_maf":
         model = Unet(channel, num_classes, sr_layer=5, before=True, sr_seg_fusion=True, ss_maf=True,
                      upscale_rate=upscale_rate, super_reso=True)
@@ -257,6 +269,7 @@ def main_worker(gpu, ngpus_per_node, args, config):
             test_mask_paths += local_masks
 
     elif dataset == "ddr":
+        print("Using ddr dataset")
         if num_classes <= 2:
             train_paths, train_mask_paths = get_ddr_paths(image_dir, "train", ltype=config["ltype"],
                                                           image_suffix=image_suffix, mask_suffix=mask_suffix)
@@ -267,7 +280,6 @@ def main_worker(gpu, ngpus_per_node, args, config):
             test_paths, test_mask_paths = get_paths(image_dir.replace("train", "valid"),
                                                           mask_dir.replace("train", "valid"), image_suffix,
                                                           mask_suffix)
-
     elif dataset == "crossmoda":
         image_dirs = glob.glob(os.path.join(image_dir, "*"))
         train_dirs, val_dirs = train_test_split(image_dirs, test_size=0.3)
@@ -343,8 +355,9 @@ def main_worker(gpu, ngpus_per_node, args, config):
                     os.path.join(os.path.dirname(path), os.path.basename(path)[:-4] + f"{mask_suffix}"))
     elif dataset == "idrid":
         train_paths, train_mask_paths = get_paths(image_dir, mask_dir, image_suffix, mask_suffix)
-        test_paths, test_mask_paths = get_paths(image_dir.replace("train", "test"), mask_dir.replace("train", "test"),
-                                                image_suffix, mask_suffix)
+        train_paths, test_paths, train_mask_paths, test_mask_paths = train_test_split(train_paths, train_mask_paths, random_state=66, test_size=0.2)
+        # test_paths, test_mask_paths = get_paths(image_dir.replace("train", "test"), mask_dir.replace("train", "test"),
+        #                                         image_suffix, mask_suffix)
     else:
         test_size = 0.2
         image_paths, mask_paths = get_paths(image_dir, mask_dir, image_suffix, mask_suffix)
@@ -405,15 +418,22 @@ def main_worker(gpu, ngpus_per_node, args, config):
         decouple_sr_loss = SSIMLoss(data_range=1)
     # if fusion:
     # rmi_loss = RMILoss(num_classes=num_classes, rmi_pool_way=1)
+    # seg_loss = nn.CrossEntropyLoss()
     seg_loss = nn.CrossEntropyLoss()
     if num_classes == 1:
         seg_loss = nn.BCEWithLogitsLoss()
-    if dataset == "ddr" and model_name.lower() == "ss_maf":
-        seg_loss = CBCE()
+    # if (dataset == "ddr" and model_name.lower() == "ss_maf") or args.cbce:
+    #     seg_loss = CBCE()
+    # elif args.focal:
+    #     seg_loss = FocalLoss()
     # rmi_loss = RMILoss(num_classes=num_classes, rmi_pool_way=1)
     decouple_loss_seg = RMILoss(num_classes=num_classes, rmi_pool_way=1)
+    if (dataset == "ddr" and model_name.lower() == "ss_maf") or args.cbce:
+        seg_loss = CBCE()
+    elif args.focal:
+        seg_loss = FocalLoss()
     if model_name.lower() == "supervessel" or model_name.lower() == "ss_maf":
-        decouple_loss_sr = nn.MSELoss()
+        decouple_sr_loss = nn.MSELoss()
     if model_name.lower() == "supervessel":
         decouple_loss_seg = nn.CrossEntropyLoss()
     # decouple_loss = DiceLoss(smooth=0, gdice=False)
@@ -443,7 +463,7 @@ def main_worker(gpu, ngpus_per_node, args, config):
             else:
                 x, mask = data
             x = x.to(device, dtype=torch.float32)
-            mask = mask.to(device, dtype=torch.long if isinstance(seg_loss, nn.CrossEntropyLoss) or isinstance(seg_loss, CBCE) else torch.float32)
+            mask = mask.to(device, dtype=torch.long if isinstance(seg_loss, nn.CrossEntropyLoss) or isinstance(seg_loss, CBCE) or isinstance(seg_loss, FocalLoss) else torch.float32)
             if num_classes == 1:
                 mask = mask.unsqueeze(1)
             optimizer.zero_grad()
@@ -499,7 +519,7 @@ def main_worker(gpu, ngpus_per_node, args, config):
 
                 if fusion_sr is not None:
                     # loss += sr_loss(fusion_sr, hr)
-                    loss += decouple_loss_sr(fusion_sr, hr)
+                    loss += decouple_sr_loss(fusion_sr, hr)
 
                 if fusion_seg is not None:
                     # loss += seg_loss(fusion_seg, mask)
@@ -620,6 +640,10 @@ if __name__ == "__main__":
                         help='seed for initializing training. ')
     parser.add_argument('--gpu', default=None, type=int,
                         help='ID of the gpu ')
+    parser.add_argument("--focal", action="store_true", default=False,
+                        help="whether use focal loss")
+    parser.add_argument("--cbce", action="store_true", default=False,
+                        help="whether use cbce loss")
     args = parser.parse_args()
     with open(args.json_path) as f:
         config = json.load(f)
@@ -641,6 +665,10 @@ if __name__ == "__main__":
                 mid += "after"
         else:
             mid = ""
+        if args.focal:
+            mid += "_focal"
+        elif args.cbce:
+            mid += "_cbce"
         config["ckpt_dir"] = os.path.join("ckpt", config["dataset"],
                                           model_name+"_" + "_".join([str(s) for s in config["image_size"]])+mid, str(i))
         print(config["ckpt_dir"])
