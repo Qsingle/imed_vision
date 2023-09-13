@@ -36,6 +36,7 @@ from models.segmentation.denseunet import Dense_Unet
 from models.segmentation.dedcgcnee import DEDCGCNEE
 from models.super_resolution import ESPCN
 from models.segmentation.dpt import DPT
+from models.segmentation.learnable_sam import PromptSAM
 
 
 def main(config):
