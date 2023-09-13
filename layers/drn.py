@@ -14,6 +14,13 @@ import torch.nn.functional as F
 
 class DRN(nn.Module):
     def __init__(self, dim, eps=1e-5) -> None:
+        """Implementation of the Domain Representation Normalization module
+         "Source-Free Domain Adaptation for Real-World Image Dehazing"<https://dl.acm.org/doi/abs/10.1145/3503161.3548410>
+
+        Args:
+            dim (int): The number of dimension for the feature
+            eps (float, optional): Minimal non-zero value to avoid zero. Defaults to 1e-5.
+        """
         super(DRN, self).__init__()
         self.eps = eps
         self.di = nn.InstanceNorm2d(dim)
