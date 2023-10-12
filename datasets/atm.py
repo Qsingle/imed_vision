@@ -9,7 +9,6 @@ from __future__ import division
 from __future__ import absolute_import
 
 import os
-import torchio as tio
 from torch.utils.data import Dataset
 import SimpleITK as sitk
 from scipy.ndimage import zoom
@@ -19,60 +18,7 @@ from pathlib import Path
 import random
 import cv2
 
-def random_flip(img, label=None, p=0.5):
-    if random.random() < p:
-        if random.random() < p:
-            for i in range(img.shape[0]):
-                img[i, :, :] = cv2.flip(img[i, :, :], 0)
-            if not (label is None):
-                for i in range(label.shape[0]):
-                    label[i, :, :] = cv2.flip(label[i, :, :], 0)
-        else:
-            for i in range(img.shape[0]):
-                img[i, :, :] = cv2.flip(img[i, :, :], 1)
-            if not (label is None):
-                for i in range(label.shape[0]):
-                    label[i, :, :] = cv2.flip(label[i, :, :], 1)
-    return img, label
-
-def random_shift(img, label, p=0.5):
-    if random.random() < p:  #Shift
-        vertical = np.random.randint(-img.shape[1] // 8, img.shape[1] // 8)
-        horizon = np.random.randint(-img.shape[1] // 8, img.shape[1] // 8)
-        M_img = np.float32([[0, 1, horizon], [1, 0, vertical]])
-        for i in range(img.shape[0]):
-            img[i, :, :] = cv2.warpAffine(img[i, :, :], M_img, (img.shape[1], img.shape[2]))
-        for i in range(label.shape[0]):
-            label[i, :, :] = cv2.warpAffine(label[i, :, :], M_img, (label.shape[1], label.shape[2]))
-    return img, label
-
-def random_rotate(img, label, p=0.5, max_degree=45):
-    if random.random()<p: 
-        degree=np.random.randint(0, max_degree)
-        M_img = cv2.getRotationMatrix2D(((img.shape[1]-1)/2.0,(img.shape[2]-1)/2.0),degree,1)
-        M_label=cv2.getRotationMatrix2D(((label.shape[1]-1)/2.0,(label.shape[2]-1)/2.0),degree,1)
-        for i in range(img.shape[0]):
-            img[i,:,:]=cv2.warpAffine(img[i,:,:], M_img, (img.shape[1],img.shape[2]))
-        for i in range(label.shape[0]):
-            label[i, :, :] = cv2.warpAffine(label[i, :, :], M_label, (label.shape[1], label.shape[2]))
-    return img, label
-
-def random_crop(img, label, img_size, crop_size):
-    start_z = random.randint(0, img_size[0] - crop_size[0]) if crop_size[0] < img_size[0] else None
-    start_x = random.randint(0, img_size[1] - crop_size[1]) if crop_size[1] < img_size[1] else None
-    start_y = random.randint(0, img_size[2] - crop_size[2]) if crop_size[2] < img_size[2] else None
-    if start_z is None or start_x is None or start_y is None:
-        p_z = (crop_size[0] - img_size[0]) // 2 if start_z is None else 0
-        p_x = (crop_size[1] - img_size[1]) // 2 if start_x is None else 0
-        p_y = (crop_size[2] - img_size[2]) // 2 if start_y is None else 0
-        img = np.pad(img, [(p_z, p_z), (p_x, p_x), (p_y, p_y)], mode="constant")
-        label = np.pad(img, [(p_z, p_z), (p_x, p_x), (p_y, p_y)], mode="constant")
-        start_z = 0 if start_z is None else start_z
-        start_x = 0 if start_x is None else start_x
-        start_y = 0 if start_y is None else start_y
-    crop_img = img[start_z:(start_z + crop_size[0]), start_x:(start_x + crop_size[1]), start_y:(start_y + crop_size[2])]
-    crop_label = label[start_z:start_z+crop_size[0], start_x:(start_x+crop_size[1]),start_y:(start_y+crop_size[2])]
-    return crop_img, crop_label
+from comm.transform import random_crop3d as random_crop, random_flip_3d as random_flip, random_rotate_3d as random_rotate, random_shift_3d as random_shift
 
 class ATM(Dataset):
     def __init__(self, data_dir:Union[str, Path], txt_path:Union[str, Path],

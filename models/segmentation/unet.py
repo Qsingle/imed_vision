@@ -573,7 +573,18 @@ class UNet3D(nn.Module):
             self.sr_module = PixelShuffle3d(scale=upscale_rate)
             self.fusion = fusion
             if fusion:
-                self.seg_sr_fusion = CrossGL3D(base_ch, base_ch)
+                hidden_state = 32
+                # if num_classes < 32:
+                #     hidden_state = 32
+                # elif num_classes < 64:
+                #     hidden_state = 64
+                # elif num_classes < 128:
+                #     hidden_state = 128
+                # elif num_classes < 256:
+                #     hidden_state = 256
+                # else:
+                #     hidden_state = max_ch
+                self.seg_sr_fusion = CrossGL3D(base_ch, base_ch, hidden_state=hidden_state)
 
     def forward(self, x):
         modal1_1, down = self.modal1_down1(x)

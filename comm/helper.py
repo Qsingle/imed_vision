@@ -21,7 +21,7 @@ def to_tuple(input, n):
         A tuple with n data
     """
     if isinstance(input, collections.abc.Iterable):
-        assert len(input) == n, "tuple len is not equal to n: {}".format(input)
+        assert len(input) == n, "tuple len is not equal to n: {}".format(len(input))
         spatial_axis = map(int, input)
         value = tuple(spatial_axis)
         return value

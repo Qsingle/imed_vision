@@ -24,9 +24,15 @@ class DRN(nn.Module):
         super(DRN, self).__init__()
         self.eps = eps
         self.di = nn.InstanceNorm2d(dim)
+        # self.dv_conv = nn.Sequential(
+        #     nn.Conv2d(dim*3, dim, 1, 1),
+        #     nn.Conv2d(dim, dim, 1, 1)
+        # )
         self.dv_conv = nn.Sequential(
-            nn.Conv2d(dim*3, dim, 1, 1),
-            nn.Conv2d(dim, dim, 1, 1)
+            nn.Conv2d(dim*3, dim, 3, 1, 1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(dim, dim, 3, 1, 1),
+            nn.ReLU(inplace=True)
         )
     
     def forward(self, x):

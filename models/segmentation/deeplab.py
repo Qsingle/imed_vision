@@ -14,7 +14,7 @@ import torch.nn.functional as F
 # from models.classification.resnet import *
 from models.classification import create_backbone
 from layers.utils import *
-from layers.task_fusion import CrossGL
+from layers.task_fusion import CrossGL, CAGL
 from layers.task_fusion import CrossTaskAttention
 
 __all__ = ["DeeplabV3", "DeeplabV3Plus", "ASPP", "ImagePooling"]
@@ -180,7 +180,7 @@ class DeeplabV3Plus(nn.Module):
             dilations = [1, 1, 1, 2]
             rates = [1, 12, 24, 36]
         else:
-            raise ValueError("Unknown output stride, e xcept 16 or 8 but got {}".format(output_stride))
+            raise ValueError("Unknown output stride, except 16 or 8 but got {}".format(output_stride))
 
         multi_grids = [1, 2, 4]
         # self.backbone = backbones[backbone](in_ch=in_ch, strides=strides,
@@ -229,7 +229,8 @@ class DeeplabV3Plus(nn.Module):
                 if cross_att:
                     self.sr_seg_fusion_module = CrossTaskAttention(256, 256, patch_size=16)
                 else:
-                    self.sr_seg_fusion_module = CrossGL(256, 256)
+                    # self.sr_seg_fusion_module = CrossGL(256, 256)
+                    self. sr_seg_fusion_module = CAGL(256, 256)
 
 
     def forward(self, x):

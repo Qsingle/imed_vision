@@ -12,6 +12,45 @@ from typing import Optional, Tuple, Type, Union, Sequence
 
 from .common import LayerNorm2d, MLPBlock
 
+class Adapter_Layer(nn.Module):
+    def __init__(self, embed_dim, mlp_ratio=0.25, norm_layer = nn.LayerNorm, skip_connect=True):
+        super().__init__()
+        self.skip_connect = skip_connect
+        hidden_dim = int(embed_dim * mlp_ratio)
+        self.norm = norm_layer(embed_dim)
+        self.avg_pool = nn.AdaptiveAvgPool2d(1)
+        self.channel = nn.Sequential(
+                nn.Linear(embed_dim, hidden_dim, bias=False),
+                nn.ReLU(),
+                nn.Linear(hidden_dim, embed_dim, bias=False),
+                nn.Sigmoid()
+        )
+
+        self.spatial = nn.Sequential(
+                nn.Conv2d(embed_dim, embed_dim, kernel_size=3, stride=2, padding=1, bias=False),
+                nn.ReLU(),
+                nn.ConvTranspose2d(embed_dim, embed_dim, kernel_size=4, stride=2, padding=1, bias=False),
+                nn.ReLU(),
+        )
+        
+        for m in self.modules():
+            if isinstance(m, (nn.Linear, nn.Conv2d, nn.ConvTranspose2d)):
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                
+    def forward(self, x):
+        #x -> （B, H, W, C）-> （B, C, H, W）
+        x = x.permute(0,3,1,2)
+        B, C, _, _ = x.size()
+        x_channel = self.channel(self.avg_pool(x).view(B, C)).view(B, C, 1, 1) * x
+        x_spatial = self.spatial(x_channel)
+        
+        if self.skip_connect:
+            x = x + x_spatial
+        else:
+            x = x_spatial
+        #（B, C, H, W） -> (B, H, W, C)
+        x = x.permute(0,2,3,1)
+        return self.norm(x)
 
 # This class and its supporting functions below lightly adapted from the ViTDet backbone available at: https://github.com/facebookresearch/detectron2/blob/main/detectron2/modeling/backbone/vit.py # noqa
 class ImageEncoderViT(nn.Module):
@@ -33,6 +72,7 @@ class ImageEncoderViT(nn.Module):
         rel_pos_zero_init: bool = True,
         window_size: int = 0,
         global_attn_indexes: Tuple[int, ...] = (),
+        adapter_train:bool = False
     ) -> None:
         """
         Args:
@@ -51,6 +91,7 @@ class ImageEncoderViT(nn.Module):
             rel_pos_zero_init (bool): If True, zero initialize relative positional parameters.
             window_size (int): Window size for window attention blocks.
             global_attn_indexes (list): Indexes for blocks using global attention.
+            adapter_train (bool): whether use adapter layer
         """
         super().__init__()
         self.img_size = img_size
@@ -82,6 +123,7 @@ class ImageEncoderViT(nn.Module):
                 rel_pos_zero_init=rel_pos_zero_init,
                 window_size=window_size if i not in global_attn_indexes else 0,
                 input_size=(img_size // patch_size, img_size // patch_size),
+                adapter=adapter_train,
             )
             self.blocks.append(block)
 
@@ -159,6 +201,7 @@ class Block(nn.Module):
         rel_pos_zero_init: bool = True,
         window_size: int = 0,
         input_size: Optional[Tuple[int, int]] = None,
+        adapter: bool = False,
     ) -> None:
         """
         Args:
@@ -174,6 +217,7 @@ class Block(nn.Module):
                 use global attention.
             input_size (int or None): Input resolution for calculating the relative positional
                 parameter size.
+            adapter (bool): whether use adapter layer
         """
         super().__init__()
         self.norm1 = norm_layer(dim)
@@ -190,6 +234,9 @@ class Block(nn.Module):
         self.mlp = MLPBlock(embedding_dim=dim, mlp_dim=int(dim * mlp_ratio), act=act_layer)
 
         self.window_size = window_size
+        self.adapter = adapter
+        if self.adapter:
+            self.Adapter = Adapter_Layer(dim)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         shortcut = x
@@ -205,7 +252,12 @@ class Block(nn.Module):
             x = window_unpartition(x, self.window_size, pad_hw, (H, W))
 
         x = shortcut + x
-        x = x + self.mlp(self.norm2(x))
+
+        if self.adapter:
+            x_norm = self.norm2(x)
+            x = x + self.mlp(x_norm) + self.Adapter(x_norm)
+        else:
+            x = x + self.mlp(self.norm2(x))
 
         return x
 

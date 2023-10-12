@@ -5,6 +5,7 @@
     Create Time: 2023-06-10 11:16
 """
 import torch
+from torch import Tensor
 import math
 import warnings
 def _no_grad_trunc_normal_(tensor, mean, std, a, b):

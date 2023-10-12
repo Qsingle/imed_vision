@@ -8,13 +8,15 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from typing import List
+from functools import partial
 
 import sys
 sys.path.append("../../")
 
 from models.classification import create_backbone
 from models.classification import BACKBONE_REGISTER
-from models.segmentation.segment_anything import build_sam_vit_b, build_sam_vit_l, build_sam_vit_h
+from models.segmentation.segment_anything.modeling import ImageEncoderViT
+from models.segmentation.segment_anything.build_sam import build_sam_med_2d
 
 def update_cfg(default:dict, cfg:dict):
     new_cfg = {}
@@ -39,6 +41,40 @@ DEFAULT_CFG = {
         "patch_size": 16,
         "img_size": [224],
     },
+    "dinov2_vit_small":  {
+              "patch_size": 14,
+              "drop_path_rate": 0.4,
+              "ffn_layer": "mlp",
+              "block_chunks": 0,
+              "img_size": 518,
+              "init_values": 1e-5
+        
+            },
+    "dinov2_vit_large":  {
+              "patch_size": 14,
+              "drop_path_rate": 0.4,
+              "ffn_layer": "mlp",
+              "block_chunks": 0,
+              "img_size": 518,
+              "init_values": 1e-5
+        
+            },
+    "dinov2_vit_base": {
+              "patch_size": 14,
+              "drop_path_rate": 0.4,
+              "ffn_layer": "mlp",
+              "block_chunks": 0,
+              "img_size": 518,
+              "init_values": 1e-5
+    },
+    "dinov2_vit_giant2": {
+              "patch_size": 14,
+              "drop_path_rate": 0.4,
+              "ffn_layer": "swiglufused",
+              "block_chunks": 0,
+              "img_size": 518,
+              "init_values": 1e-5
+    },
     "beit_vit_base": {
         "patch_size": 16,
         "img_size": 224,
@@ -52,17 +88,35 @@ DEFAULT_CFG = {
     "sam_vit_b": {
         "patch_size": 16,
         "img_size": 1024,
-        "embed_dim": 768
+        "embed_dim": 768,
+        "encoder_depth": 12,
+        "encoder_num_heads":12,
+        "encoder_global_attn_indexes":[2, 5, 8, 11],
     },
     "sam_vit_l": {
         "patch_size": 16,
         "img_size": 1024,
-        "embed_dim": 1024
+        "embed_dim": 1024,
+        "encoder_depth":24,
+        "encoder_num_heads":16,
+        "encoder_global_attn_indexes":[5, 11, 17, 23],
     },
     "sam_vit_h": {
         "patch_size": 16,
         "img_size": 1024,
-        "embed_dim": 1280
+        "embed_dim":1280,
+        "encoder_depth": 32,
+        "encoder_num_heads":16,
+        "encoder_global_attn_indexes":[7, 15, 23, 31],
+    },
+    "sam_med_2d": {
+        "patch_size": 16,
+        "img_size": 1024,
+        "embed_dim": 768,
+        "encoder_depth": 12,
+        "encoder_num_heads":12,
+        "encoder_global_attn_indexes":[2, 5, 8, 11],
+        "adapter_train": True
     }
 }
 
@@ -232,12 +286,6 @@ class DPTDecoder(nn.Module):
         net = self.refine_4(layer1, net)
         return net
 
-sam_build_func = {
-    "sam_vit_b": build_sam_vit_b,
-    "sam_vit_l":  build_sam_vit_l,
-    "sam_vit_h": build_sam_vit_h
-}
-
 class DPT(nn.Module):
     def __init__(self, arch:str="dino_vit_base", inter_blocks:List[int]=[3, 6, 9, 12], in_ch=3, out_dim=1,
                  fea_dims=[96, 192, 384, 768], fusion_dim=256, drop_rate=0.1, non_negtive=True,
@@ -245,14 +293,43 @@ class DPT(nn.Module):
                  checkpoint=None, key=None, upscale_rate=2, super_reso=False, aux=False, **kwargs):
         super(DPT, self).__init__()
         supported_arch = [name for name in BACKBONE_REGISTER.get_names() if "vit" in name]
-        supported_arch += ["sam_vit_b", "sam_vit_l", "sam_vit_h"]
+        supported_arch += ["sam_vit_b", "sam_vit_l", "sam_vit_h", "lvm_med_vit_b", "sam_med_2d"]
+        if arch == "lvm_med_vit_b":
+            DEFAULT_CFG[arch] = DEFAULT_CFG["sam_vit_b"]
         default_cfg = DEFAULT_CFG[arch]
         cfg = update_cfg(default_cfg, kwargs)
         self.sam = False
         assert arch in supported_arch, "We only support visual transformer architechture now, excepht in {}, but got {}".format(supported_arch, arch)
-        if arch.startswith("sam"):
-            self.encoder = sam_build_func[arch](checkpoint=None).image_encoder
-            self.reset_backbone(checkpoint, key=None)
+        if arch.startswith("sam") or arch == "lvm_med_vit_b":
+            prompt_embed_dim = 256
+            image_size = 1024
+            vit_patch_size = 16
+            encoder_depth = cfg["encoder_depth"]
+            encoder_embed_dim = cfg["embed_dim"]
+            encoder_num_heads = cfg["encoder_num_heads"]
+            encoder_global_attn_indexes = cfg["encoder_global_attn_indexes"]
+            use_abs_pos = True
+            if arch == "sam_med_2d":
+                self.encoder = build_sam_med_2d(checkpoint=checkpoint).image_encoder
+            else:
+                if "lvm" in arch:
+                    use_abs_pos = False
+                self.encoder = ImageEncoderViT(
+                    depth=encoder_depth,
+                    embed_dim=encoder_embed_dim,
+                    img_size=image_size,
+                    mlp_ratio=4,
+                    norm_layer=partial(torch.nn.LayerNorm, eps=1e-6),
+                    num_heads=encoder_num_heads,
+                    patch_size=vit_patch_size,
+                    qkv_bias=True,
+                    use_rel_pos=True,
+                    use_abs_pos=use_abs_pos,
+                    global_attn_indexes=encoder_global_attn_indexes,
+                    window_size=14,
+                    out_chans=prompt_embed_dim,
+                )
+                self.reset_backbone(checkpoint, key=key)
             for param in self.encoder.parameters():
                 param.requires_grad = False
             self.sam = True
@@ -262,7 +339,7 @@ class DPT(nn.Module):
         image_size = real_img_size or cfg['img_size']
         if isinstance(image_size, list):
             image_size = image_size[0]
-        if arch.startswith("sam"):
+        if arch.startswith("sam") or arch.startswith("lvm_med"):
             dim = cfg["embed_dim"]
             self.patch_size = cfg["patch_size"]
         else:

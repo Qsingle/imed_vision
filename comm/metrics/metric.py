@@ -55,7 +55,7 @@ class Metric:
         result["precision"] = precision
         result["acc"] = acc
         result["dice"] = dice
-        result["specifity"] = specficity
+        result["specificity"] = specficity
         result["iou"] = iou
         result["recall"] = recall
         result["mk"] = precision + npv - 1

@@ -12,9 +12,9 @@ import os
 import glob
 from typing import Union,List
 from albumentations import Compose, ColorJitter, HorizontalFlip
-from albumentations import VerticalFlip, RandomCrop
+from albumentations import VerticalFlip, RandomCrop, MotionBlur
 from albumentations import GaussianBlur, GaussNoise
-from albumentations import Normalize, Resize, ShiftScaleRotate
+from albumentations import Normalize, Resize, ShiftScaleRotate, OneOf, JpegCompression
 import cv2
 import numpy as np
 
@@ -73,9 +73,14 @@ class CityScapeDataset(Dataset):
                 VerticalFlip(),
             ]
             if self.crop:
-                aug_task.append(
-                    RandomCrop(self.output_size[0], self.output_size[1])
-                )
+                if self.super_reso:
+                    aug_task.append(
+                        RandomCrop(self.output_size[0]*self.upscale_rate, self.output_size[1]*self.upscale_rate)
+                    )
+                else:
+                    aug_task.append(
+                        RandomCrop(self.output_size[0], self.output_size[1])
+                    )
             aug = Compose(aug_task)
             aug_data = aug(image=image, mask=mask)
             image = aug_data["image"]
@@ -85,10 +90,7 @@ class CityScapeDataset(Dataset):
         hr = None
         if self.super_reso:
             if out_h * self.upscale_rate != h or out_w * self.upscale_rate != w:
-                if self.augmentation:
-                    hr_re = RandomCrop(out_h*self.upscale_rate, out_w*self.upscale_rate, always_apply=True)(image=image, mask=mask)
-                else:
-                    hr_re = Resize(out_h*self.upscale_rate, out_w*self.upscale_rate, always_apply=True)(image=image, mask=mask)
+                hr_re = Resize(out_h*self.upscale_rate, out_w*self.upscale_rate, always_apply=True)(image=image, mask=mask)
                 hr = hr_re["image"]
                 mask = hr_re["mask"]
                 image = hr.copy()
@@ -98,7 +100,12 @@ class CityScapeDataset(Dataset):
         re_data = re(image=image, mask=mask)
         image = re_data["image"]
         if self.augmentation:
-            noise = GaussianBlur()
+            noise = OneOf([
+                GaussianBlur(),
+                GaussNoise(),
+                JpegCompression(quality_lower=90),
+                MotionBlur()
+            ])
             image = noise(image=image)["image"]
         if hr is None:
             mask = re_data["mask"]

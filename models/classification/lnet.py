@@ -121,7 +121,6 @@ class LightNet(nn.Module):
 
 
 if __name__ == "__main__":
-    from torchstat import stat
     from torchvision import models
     import sys
     import os
@@ -130,6 +129,3 @@ if __name__ == "__main__":
     model = LightNet(3, groups=4, layers=[2, 4, 16, 8])
     out = model(x)
     print(out.shape)
-    stat(model, (3, 224, 224))
-    shufflenet = models.shufflenet_v2_x1_0(pretrained=False)
-    stat(shufflenet, (3, 224, 224))

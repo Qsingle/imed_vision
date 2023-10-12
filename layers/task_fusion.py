@@ -276,3 +276,86 @@ class CrossTaskAttention(nn.Module):
         # y_patch = F.interpolate(self.y_unpatch(y_patch), size=y.size()[2:], mode="bilinear", align_corners=True)
         x, y = self.cross_attention([x, y])
         return x, y
+
+class DownAttention4D(nn.Module):
+    def __init__(self, dim, down_rate=32, num_head=4, sclae_init=1e-6) -> None:
+        super().__init__()
+        self.down_conv = nn.Conv2d(dim, dim, kernel_size=down_rate, stride=down_rate, groups=dim)
+        self.head_dim = dim // num_head
+        self.num_head = num_head
+        self.gamma = self.head_dim ** -0.5
+        self.q_proj = nn.Sequential(
+            nn.Conv2d(dim, dim, 1, 1, 0),
+            nn.BatchNorm2d(dim)
+        )
+        self.k_proj = nn.Sequential(
+            nn.Conv2d(dim, dim, 1, 1),
+            nn.BatchNorm2d(dim)
+        )
+        self.v_proj = nn.Sequential(
+            nn.Conv2d(dim, dim, 1, 1),
+            nn.BatchNorm2d(dim)
+        )
+        self.layer_scaler = nn.Parameter(torch.ones(dim)*sclae_init, requires_grad=True)
+        self.ffn = nn.Sequential(
+            nn.Conv2d(dim, dim*2, 1, 1),
+            nn.GELU(),
+            nn.Conv2d(dim*2, dim, 1, 1),
+            nn.GELU()
+        )
+        self.ffn_scaler = nn.Parameter(torch.ones(dim)*sclae_init, requires_grad=True)
+    
+    def forward(self, x):
+        down_x = self.down_conv(x)
+        bs, ch, h, w = down_x.size()
+        q_x = self.q_proj(down_x).reshape(bs, self.num_head, self.head_dim, h*w).transpose(2, 3) #bs, num_head, N, head_num
+        k_x = self.k_proj(down_x).reshape(bs, self.num_head, self.head_dim, h*w) #bs, num_head, head_num, N
+        v_x = self.v_proj(down_x).reshape(bs, self.num_head, self.head_dim, h*w).transpose(2, 3) #bs, num_head, N, head_num
+        att = q_x @ k_x
+        att = torch.softmax(att*self.gamma, dim=-1)
+        net = att @ v_x
+        net = net.transpose(2, 3).reshape(bs, ch, h, w)
+        net = self.layer_scaler.unsqueeze(0).unsqueeze(-1).unsqueeze(-1) * net + down_x
+        net = self.ffn(net)*self.ffn_scaler.unsqueeze(0).unsqueeze(-1).unsqueeze(-1) + net
+        net = F.interpolate(net, size=x.size()[2:], mode="bilinear", align_corners=True)
+        return net
+
+class CAGL(nn.Module):
+    def __init__(self, in_ch1, in_ch2, hidden_state=32, reduction=4, down_rate=32, num_head=4) -> None:
+        super(CAGL, self).__init__()
+        fu_ch = in_ch1 + in_ch2
+        self.fu_se = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1),
+            nn.Conv2d(fu_ch, fu_ch//reduction, 1, 1),
+            nn.ReLU(),
+            nn.Conv2d(fu_ch//reduction, fu_ch, 1, 1),
+            nn.Sigmoid()
+        )
+        self.fuse = nn.Conv2d(fu_ch, hidden_state, 1, 1)
+        self.global_att = DownAttention4D(hidden_state, down_rate=down_rate, num_head=num_head)
+        self.local_conv = nn.Sequential(
+            nn.Conv2d(hidden_state, hidden_state, 3, 1, 1, groups=hidden_state),
+            nn.GELU(),
+            nn.Conv2d(hidden_state, hidden_state, 1, 1),
+            nn.GELU()
+        )
+        self.out_x = nn.Sequential(
+            nn.Conv2d(hidden_state, in_ch1, 1, 1),
+            nn.Softmax(dim=1)
+        )
+        self.out_y = nn.Sequential(
+            nn.Conv2d(hidden_state, in_ch2, 1, 1),
+            nn.Softmax(dim=1)
+        )
+
+    
+    def forward(self, x, y):
+        fuse = torch.cat([x, y], dim=1)
+        fuse = self.fu_se(fuse)*fuse
+        fuse = self.fuse(fuse)
+        fuse_g = self.global_att(fuse)
+        fuse_l = self.local_conv(fuse)
+        fuse = fuse + fuse_g + fuse_l
+        o_x = self.out_x(fuse)*x + x
+        o_y = self.out_y(fuse)*y + y
+        return o_x, o_y

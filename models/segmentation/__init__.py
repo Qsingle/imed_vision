@@ -17,4 +17,3 @@ from .segformer import *
 from .bisenetv2 import bisenetv2_l, bisenetv2, BiseNetV2
 from .stdcnet_seg import *
 from .dual_learning import DualLearning
-from .segment_anything import build_sam_vit_b, build_sam_vit_h, build_sam_vit_l, build_sam_vit_t
