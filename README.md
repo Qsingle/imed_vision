@@ -60,8 +60,8 @@
 
 ## TODO
 
-+ Update the structure for this repository
-+ Add the scripts for classification model train
+- [x] Update the structure for this repository
+- [ ] Add the scripts for classification model train 
 
 
 

@@ -17,14 +17,14 @@ import tqdm
 from medpy.metric import hd95
 from medpy.metric import jc, dc
 
-from models.segmentation.unet import UNet3D
-from models.segmentation.pfseg import PFSeg3D
-from models.segmentation.vnet import VNet
-from models.segmentation.resunet import ResUNet3D
-from comm.metrics import Metric
-from datasets.atm import ATM
-from datasets.brats import Brats20
-from comm.metrics.atm_metric import branch_detected_calculation, precision_calculation, tree_length_calculation
+from imed_vision.models.segmentation.unet import UNet3D
+from imed_vision.models.segmentation.pfseg import PFSeg3D
+from imed_vision.models.segmentation.vnet import VNet
+from imed_vision.models.segmentation.resunet import ResUNet3D
+from imed_vision.comm.metrics import Metric
+from imed_vision.datasets.atm import ATM
+from imed_vision.datasets.brats import Brats20
+from imed_vision.comm.metrics.atm_metric import branch_detected_calculation, precision_calculation, tree_length_calculation
 
 def dice_coeff(output, pred):
     inter = torch.sum(output & pred)

@@ -19,21 +19,21 @@ from sklearn.model_selection import KFold
 from skimage.io import imsave
 from torch.utils.data import DataLoader
 
-from datasets.vessel_segmentation import get_paths
-from models.segmentation import Unet, SAUnet, NestedUNet, MiniUnet
-from models.segmentation.pfseg import PFSeg
-from layers.unet_blocks import *
-from comm.helper import to_tuple
-from comm.metrics import Metric
-from models.segmentation.segformer import *
-from models.segmentation import bisenetv2, bisenetv2_l
-from models.segmentation import STDCNetSeg
-from models.segmentation import DeeplabV3Plus
-from models.segmentation.scsnet import SCSNet
-from models.segmentation.denseunet import Dense_Unet
-from models.segmentation.dedcgcnee import DEDCGCNEE
-from models.super_resolution import ESPCN
-from models.segmentation.pctunet import PCTUnet
+from imed_vision.datasets.vessel_segmentation import get_paths
+from imed_vision.models.segmentation import Unet, SAUnet, NestedUNet, MiniUnet
+from imed_vision.models.segmentation.pfseg import PFSeg
+from imed_vision.layers.unet_blocks import *
+from imed_vision.comm.helper import to_tuple
+from imed_vision.comm.metrics import Metric
+from imed_vision.models.segmentation.segformer import *
+from imed_vision.models.segmentation import bisenetv2, bisenetv2_l
+from imed_vision.models.segmentation import STDCNetSeg
+from imed_vision.models.segmentation import DeeplabV3Plus
+from imed_vision.models.segmentation.scsnet import SCSNet
+from imed_vision.models.segmentation.denseunet import Dense_Unet
+from imed_vision.models.segmentation.dedcgcnee import DEDCGCNEE
+from imed_vision.models.super_resolution import ESPCN
+from imed_vision.models.segmentation.pctunet import PCTUnet
 
 
 def main(config):

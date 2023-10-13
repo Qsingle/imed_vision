@@ -27,26 +27,26 @@ import warnings
 import torch.backends.cudnn as cudnn
 import random
 
-from comm.scheduler.poly import PolyLRScheduler
-from datasets.vessel_segmentation import get_paths, SegPathDataset
-from datasets.crossmoda import CrossMoDA
-from models.segmentation import Unet, SAUnet, NestedUNet, MiniUnet
-from models.segmentation import DeeplabV3Plus
-from layers.unet_blocks import *
-from models.segmentation import ConvNeXtUNet
-from models.segmentation.segformer import *
-from models.segmentation import bisenetv2, bisenetv2_l, BiseNetV2
-from models.segmentation import STDCNetSeg
-from models.segmentation.scsnet import SCSNet
-from comm.metrics import Metric
-from models.segmentation.denseunet import Dense_Unet
-from models.segmentation.dedcgcnee import DEDCGCNEE
-from loss import RMILoss
-from loss import SSIMLoss
-from loss import CBCE
-from loss import DetailLoss
-from loss.distance_loss import DisPenalizedCE
-from models.segmentation.pctunet import PCTUnet
+from imed_vision.comm.scheduler.poly import PolyLRScheduler
+from imed_vision.datasets.vessel_segmentation import get_paths, SegPathDataset
+from imed_vision.datasets.crossmoda import CrossMoDA
+from imed_vision.models.segmentation import Unet, SAUnet, NestedUNet, MiniUnet
+from imed_vision.models.segmentation import DeeplabV3Plus
+from imed_vision.layers.unet_blocks import *
+from imed_vision.models.segmentation import ConvNeXtUNet
+from imed_vision.models.segmentation.segformer import *
+from imed_vision.models.segmentation import bisenetv2, bisenetv2_l, BiseNetV2
+from imed_vision.models.segmentation import STDCNetSeg
+from imed_vision.models.segmentation.scsnet import SCSNet
+from imed_vision.comm.metrics import Metric
+from imed_vision.models.segmentation.denseunet import Dense_Unet
+from imed_vision.models.segmentation.dedcgcnee import DEDCGCNEE
+from imed_vision.loss import RMILoss
+from imed_vision.loss import SSIMLoss
+from imed_vision.loss import CBCE
+from imed_vision.loss import DetailLoss
+from imed_vision.loss.distance_loss import DisPenalizedCE
+from imed_vision.models.segmentation.pctunet import PCTUnet
 
 def reset_weights(m):
   '''

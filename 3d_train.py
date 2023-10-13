@@ -19,17 +19,17 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.tensorboard import SummaryWriter
 import tqdm
 
-from models.segmentation.unet import UNet3D
-from models.segmentation.pfseg import PFSeg3D
-from models.segmentation.resunet import ResUNet3D
-from models.segmentation.vnet import VNet
-from comm.scheduler.poly import PolyLRScheduler
-from comm.metrics import Metric
-from datasets.atm import ATM
-from datasets.brats import Brats20
+from imed_vision.models.segmentation.unet import UNet3D
+from imed_vision.models.segmentation.pfseg import PFSeg3D
+from imed_vision.models.segmentation.resunet import ResUNet3D
+from imed_vision.models.segmentation.vnet import VNet
+from imed_vision.comm.scheduler.poly import PolyLRScheduler
+from imed_vision.comm.metrics import Metric
+from imed_vision.datasets.atm import ATM
+from imed_vision.datasets.brats import Brats20
 
-from loss import CBCE, DiceLoss, FocalLoss
-from loss.task_fusion import TaskFusionLoss
+from imed_vision.loss import CBCE, DiceLoss, FocalLoss
+from imed_vision.loss.task_fusion import TaskFusionLoss
 
 def dice_coeff(output, pred):
     inter = torch.sum(output & pred)

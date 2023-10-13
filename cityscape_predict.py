@@ -21,9 +21,9 @@ import cv2
 import argparse
 import numpy as np
 import tqdm
-from comm.metrics.metric import Metric
+from imed_vision.comm.metrics.metric import Metric
 
-from models.segmentation.deeplab import DeeplabV3Plus, DeeplabV3
+from imed_vision.models.segmentation.deeplab import DeeplabV3Plus, DeeplabV3
 
 color_id_list = [(64, 128, 64),
   (192, 0, 128),

@@ -18,11 +18,11 @@ import argparse
 import json
 import tqdm
 
-from comm.scheduler.poly import PolyLRScheduler
-from loss.tfm import TFM
-from datasets.pfseg_dataset import get_paths, PFSegDataset
-from models.segmentation import PFSeg
-from comm.metrics import Metric
+from imed_vision.comm.scheduler.poly import PolyLRScheduler
+from imed_vision.loss.tfm import TFM
+from imed_vision.datasets.pfseg_dataset import get_paths, PFSegDataset
+from imed_vision.models.segmentation import PFSeg
+from imed_vision.comm.metrics import Metric
 
 
 def main(config):

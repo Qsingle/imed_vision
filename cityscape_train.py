@@ -27,11 +27,11 @@ import torch.backends.cudnn as cudnn
 import random
 
 
-from comm.scheduler.poly import PolyLRScheduler
-from datasets.cityscape import get_paths, CityScapeDataset
-from models.segmentation.deeplab import DeeplabV3Plus
-from models.segmentation.espnets import ESPNetV2_Seg
-from comm.metrics import Metric
+from imed_vision.comm.scheduler.poly import PolyLRScheduler
+from imed_vision.datasets.cityscape import get_paths, CityScapeDataset
+from imed_vision.models.segmentation.deeplab import DeeplabV3Plus
+from imed_vision.models.segmentation.espnets import ESPNetV2_Seg
+from imed_vision.comm.metrics import Metric
 
 def get_camvid_paths(root_dir, split):
     image_paths = glob.glob(os.path.join(root_dir, split, "*.png"))
