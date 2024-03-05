@@ -53,7 +53,7 @@
 + Run the training script (e.g. [vessel_segmentation_train.py](./vessel_segmentation_train.py)).
 
   ```shel
-  python  vessel_segmentation_train.py --json_path ./configs/iostar_vessel_segmentation.json
+  python  scripts/vessel_segmentation_train.py --json_path ./configs/iostar_vessel_segmentation.json
   ```
 
   
