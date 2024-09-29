@@ -1,0 +1,24 @@
+# This CITATION.cff file was generated with cffinit.
+# Visit https://bit.ly/cffinit to generate yours today!
+
+cff-version: 1.2.0
+title: imed_vision
+message: >-
+  If you use this software, please cite it using the
+  metadata from this file.
+type: software
+authors:
+  - given-names: Zhongxi
+    family-names: Qiu
+  - given-names: Yan
+    family-names: Hu
+  - given-names: Xiaoshan
+    family-names: Chen
+  - given-names: Jiayi
+    family-names: Zhang
+  - given-names: Jiang
+    family-names: Liu
+identifiers:
+  - type: url
+    value: 'https://github.com/Qsingle/imed_vision'
+abstract: The code for some models was created by our group.

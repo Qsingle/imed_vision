@@ -214,7 +214,7 @@ def main():
                 io.imsave(os.path.join(output_dir, filename.replace("leftImg8bit", "predict_color")), pred_color.astype(np.uint8))
                 io.imsave(os.path.join(output_dir, filename.replace("leftImg8bit", "predict_labelids")), pred_lid.astype(np.uint8))
     result = metric.evalutate()
-    show_metric = ["acc", "recall", "iou", "recall", "precision", "specifity", "dice"]
+    show_metric = ["acc", "recall", "iou", "recall", "precision", "specificity", "dice"]
     result_text = ""
     for metric in show_metric:
         if num_classes <= 2:

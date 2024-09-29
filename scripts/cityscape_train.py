@@ -255,7 +255,7 @@ def main_worker(gpu, ngpus_per_node, args, config):
                 test_metric.update(pred, mask)
 
             if not args.distribution or (args.distribution and args.rank==0):
-                show_metric = ["acc", "recall", "iou", "recall", "precision", "specifity", "dice"]
+                show_metric = ["acc", "recall", "iou", "recall", "precision", "specificity", "dice"]
                 result = test_metric.evalutate()
                 result_text = ""
                 if num_classes <= 2:
